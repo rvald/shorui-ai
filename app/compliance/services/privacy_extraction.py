@@ -1,26 +1,19 @@
 """
 Privacy-Aware Extraction Service for HIPAA compliance.
 
-Uses a self-hosted LLM on RunPod for reasoning (no PHI leakage)
-and Presidio for local PHI detection/tagging.
+Uses Presidio for local PHI detection and OpenAI for compliance reasoning.
 
-
-- Presidio runs FIRST to detect and tag PHI locations
-- LLM receives FULL text (no masking - it's on your infrastructure)
-- Focuses on compliance reasoning
-- Logs all PHI detections to audit trail
+Flow:
+- Presidio runs FIRST to detect and tag PHI locations (local, no external calls)
+- OpenAI analyzes compliance and provides reasoning
+- All PHI detections are logged to audit trail
 """
 
 import asyncio
 import hashlib
-import os
-
-# Add rag_pipeline_service to path for AuditService
-import sys
 import time
 from typing import Any
 
-import httpx
 from loguru import logger
 from openai import OpenAI
 
@@ -31,7 +24,6 @@ from app.ingestion.services.context_optimizer import (
 from app.compliance.services.phi_detector import get_phi_detector
 from shorui_core.config import settings
 from shorui_core.domain.hipaa_schemas import (
-    AuditEvent,
     AuditEventType,
     PHIComplianceAnalysis,
     PHIExtractionResult,
@@ -49,7 +41,6 @@ except ImportError:
 
 class ExtractionError(Exception):
     """Raised when extraction fails."""
-
     pass
 
 
@@ -139,70 +130,30 @@ NEEDS_LLM_ANALYSIS = {
 
 class PrivacyAwareExtractionService:
     """
-    HIPAA-compliant extraction service using self-hosted LLM and local PHI detection.
+    HIPAA-compliant extraction service using Presidio for PHI detection
+    and OpenAI for compliance reasoning.
 
     Flow:
     1. Presidio detects PHI locally (no external calls)
-    2. Full text sent to RunPod LLM (your infrastructure - no leakage)
-    3. LLM provides compliance reasoning
-    4. Results logged to audit trail
+    2. OpenAI provides compliance reasoning
+    3. Results logged to audit trail
 
     Usage:
         service = PrivacyAwareExtractionService()
         result = await service.extract(transcript_text, transcript_id="abc123")
     """
 
-    def __init__(
-        self,
-        runpod_base_url: str | None = None,
-        runpod_api_token: str | None = None,
-        model_name: str | None = None,
-        phi_confidence_threshold: float = 0.4,
-    ):
+    def __init__(self, phi_confidence_threshold: float = 0.4):
         """
         Initialize the privacy-aware extraction service.
 
         Args:
-            runpod_base_url: RunPod vLLM endpoint URL. Falls back to settings.RUNPOD_API_URL
-            runpod_api_token: RunPod API token. Falls back to settings.RUNPOD_API_TOKEN
-            model_name: Model name for the RunPod LLM. Falls back to settings.MODEL_INFERENCE
-            phi_confidence_threshold: Minimum confidence for PHI detection
+            phi_confidence_threshold: Minimum confidence for PHI detection (0.0-1.0)
         """
-        self.runpod_base_url = runpod_base_url or getattr(settings, "RUNPOD_API_URL", "") or None
-        self.runpod_api_token = (
-            runpod_api_token or getattr(settings, "RUNPOD_API_TOKEN", "") or None
-        )
-        self.model_name = model_name or getattr(
-            settings, "MODEL_INFERENCE", "meta-llama/Llama-3.1-70B-Instruct"
-        )
         self.phi_detector = get_phi_detector(min_confidence=phi_confidence_threshold)
-
-        # HTTP client for RunPod API calls
-        self._client: httpx.AsyncClient | None = None
-
-        # HTTP client for RunPod API calls
-        self._client: httpx.AsyncClient | None = None
 
         # Audit service for tamper-evident logging
         self._audit_service = AuditService() if AuditService else None
-
-        # Regulation retriever for RAG-grounded compliance analysis
-        self._regulation_retriever = None  # Lazy init
-
-    async def _get_client(self) -> httpx.AsyncClient:
-        """Get or create the async HTTP client with auth headers."""
-        if self._client is None:
-            headers = {}
-            if self.runpod_api_token:
-                headers["Authorization"] = f"Bearer {self.runpod_api_token}"
-            self._client = httpx.AsyncClient(timeout=120.0, headers=headers)
-        return self._client
-
-    async def close(self):
-        """Close the HTTP client."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
 
     async def extract(
         self,
@@ -237,7 +188,8 @@ class PrivacyAwareExtractionService:
         )
 
         # Step 2: LLM compliance analysis (if enabled and spans found)
-        if not skip_llm and phi_spans and self.runpod_base_url:
+        compliance_result = None
+        if not skip_llm and phi_spans:
             try:
                 compliance_result = await self._analyze_compliance(text, phi_spans)
                 # Merge LLM insights back into spans
@@ -249,16 +201,12 @@ class PrivacyAwareExtractionService:
 
         processing_time_ms = int((time.time() - start_time) * 1000)
 
-        # Determine compliance analysis result (if any)
-        # Note: compliance_result variable is defined in the try block above if successful
-        final_compliance = compliance_result if ("compliance_result" in locals()) else None
-
         return PHIExtractionResult(
             transcript_id=transcript_id or "unknown",
             phi_spans=phi_spans,
             processing_time_ms=processing_time_ms,
-            detector_versions={"presidio": "2.2", "llm": self.model_name},
-            compliance_analysis=final_compliance,
+            detector_versions={"presidio": "2.2", "llm": "gpt-4o-mini"},
+            compliance_analysis=compliance_result,
         )
 
     async def extract_batch(
@@ -288,7 +236,9 @@ class PrivacyAwareExtractionService:
         return await asyncio.gather(*[process_one(t) for t in transcripts])
 
     async def _analyze_compliance(
-        self, text: str, phi_spans: list[PHISpan]
+        self, 
+        text: str, 
+        phi_spans: list[PHISpan]
     ) -> TranscriptComplianceResult:
         """
         Use LLM to analyze compliance of detected PHI.
@@ -413,7 +363,7 @@ class PrivacyAwareExtractionService:
         """
         Call OpenAI API with structured outputs.
 
-        Uses GPT-4o with responses.parse for guaranteed JSON schema compliance.
+        Uses GPT-4o-mini with responses.parse for guaranteed JSON schema compliance.
         """
         try:
             client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -475,9 +425,7 @@ class PrivacyAwareExtractionService:
         resource_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ):
-        """
-        Log an audit event to PostgreSQL.
-        """
+        """Log an audit event to PostgreSQL."""
         if not self._audit_service:
             logger.warning(f"AuditService not available. Skipping log: {description}")
             return
@@ -492,11 +440,6 @@ class PrivacyAwareExtractionService:
             )
         except Exception as e:
             logger.error(f"Failed to log audit event: {e}")
-
-    # Legacy method kept for interface compatibility but now empty
-    def get_pending_audit_events(self) -> list[AuditEvent]:
-        """Get and clear pending audit events (Deprecated)."""
-        return []
 
 
 def compute_phi_hash(text: str) -> str:

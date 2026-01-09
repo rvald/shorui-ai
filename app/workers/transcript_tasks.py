@@ -157,8 +157,6 @@ async def _analyze_transcript_async(
         except Exception as e:
             logger.warning(f"[{job_id}] Graph ingestion failed: {e}")
 
-        await extraction_service.close()
-
         # Build result
         analysis_result = {
             "status": "completed",

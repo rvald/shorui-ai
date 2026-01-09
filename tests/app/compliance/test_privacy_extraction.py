@@ -2,7 +2,7 @@
 Tests for PrivacyAwareExtractionService.
 
 Tests the HIPAA-compliant extraction pipeline that combines
-Presidio PHI detection with RunPod LLM compliance reasoning.
+Presidio PHI detection with OpenAI LLM compliance reasoning.
 """
 
 from unittest.mock import AsyncMock, patch
@@ -25,25 +25,17 @@ class TestPrivacyAwareExtractionServiceInit:
     """Test service initialization."""
 
     def test_default_init(self):
-        """Test default initialization loads from settings."""
+        """Test default initialization."""
         service = PrivacyAwareExtractionService()
 
-        # Model name comes from settings.MODEL_INFERENCE or default
-        assert service.model_name is not None
         assert service.phi_detector is not None
-        assert service.phi_detector is not None
-        # _pending_audit_events removed, checks usage of _audit_service
         assert hasattr(service, "_audit_service")
 
-    def test_custom_model(self):
-        """Test with custom model name."""
-        service = PrivacyAwareExtractionService(model_name="meta-llama/Llama-3.2-8B-Instruct")
-        assert service.model_name == "meta-llama/Llama-3.2-8B-Instruct"
-
-    def test_custom_runpod_url(self):
-        """Test with custom RunPod URL."""
-        service = PrivacyAwareExtractionService(runpod_base_url="https://test.runpod.ai/v1")
-        assert service.runpod_base_url == "https://test.runpod.ai/v1"
+    def test_custom_confidence_threshold(self):
+        """Test with custom PHI confidence threshold."""
+        service = PrivacyAwareExtractionService(phi_confidence_threshold=0.7)
+        # Verifies that service accepts the parameter (detector may use singleton)
+        assert service.phi_detector is not None
 
 
 class TestPHIDetectionFlow:
@@ -139,7 +131,7 @@ class TestLLMComplianceAnalysis:
 
     @pytest.fixture
     def service(self):
-        return PrivacyAwareExtractionService(runpod_base_url="https://mock.runpod.ai/v1")
+        return PrivacyAwareExtractionService()
 
     @pytest.mark.asyncio
     async def test_llm_called_when_phi_found(self, service):
@@ -163,18 +155,13 @@ class TestLLMComplianceAnalysis:
             text = "Patient John Smith visited today"
             result = await service.extract(text, skip_llm=False)
 
-            # Should call LLM since skip_llm=False and we have a runpod_url
-            # and PHI was detected
+            # Should call LLM since skip_llm=False and PHI was detected
             if len(result.phi_spans) > 0:
                 mock_analyze.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_llm_not_called_when_explicitly_disabled(self):
+    async def test_llm_not_called_when_explicitly_disabled(self, service):
         """Test that LLM is not called when skip_llm=True."""
-        service = PrivacyAwareExtractionService(
-            runpod_base_url="https://test.runpod.ai/v1",
-        )
-
         with patch.object(service, "_analyze_compliance", new_callable=AsyncMock) as mock_analyze:
             text = "Patient John Smith"
             await service.extract(text, skip_llm=True)  # Explicitly skip LLM
@@ -247,22 +234,3 @@ class TestPHIHash:
 
 class TestServiceCleanup:
     """Test service cleanup."""
-
-    @pytest.mark.asyncio
-    async def test_close_client(self):
-        """Test closing the HTTP client."""
-        service = PrivacyAwareExtractionService()
-
-        # Create client
-        await service._get_client()
-        assert service._client is not None
-
-        # Close client
-        await service.close()
-        assert service._client is None
-
-    @pytest.mark.asyncio
-    async def test_get_pending_audit_events_legacy(self):
-        """Test that legacy method returns empty list."""
-        service = PrivacyAwareExtractionService()
-        assert service.get_pending_audit_events() == []
