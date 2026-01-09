@@ -82,7 +82,11 @@ class JobLedgerService:
         return job_id
 
     def update_status(
-        self, job_id: str, status: str, progress: int | None = None, error: str | None = None
+        self, 
+        job_id: str, 
+        status: str, 
+        progress: int | None = None, 
+        error: str | None = None
     ) -> None:
         """
         Update the status of a job.
@@ -108,7 +112,11 @@ class JobLedgerService:
 
         logger.debug(f"Updated job {job_id}: status={status}, progress={progress}")
 
-    def complete_job(self, job_id: str, items_indexed: int) -> None:
+    def complete_job(
+        self, 
+        job_id: str, 
+        items_indexed: int
+    ) -> None:
         """
         Mark a job as completed.
 
@@ -131,7 +139,11 @@ class JobLedgerService:
 
         logger.info(f"Completed job {job_id} with {items_indexed} items indexed")
 
-    def fail_job(self, job_id: str, error: str) -> None:
+    def fail_job(
+        self, 
+        job_id: str, 
+        error: str
+    ) -> None:
         """
         Mark a job as failed.
 
@@ -154,7 +166,10 @@ class JobLedgerService:
         logger.error(f"Failed job {job_id}: {error}")
 
     def check_idempotency(
-        self, project_id: str, filename: str, content_hash: str
+        self, 
+        project_id: str, 
+        filename: str, 
+        content_hash: str
     ) -> dict[str, Any] | None:
         """
         Check if a document has already been processed.
@@ -187,7 +202,12 @@ class JobLedgerService:
 
         return None
 
-    def add_to_dlq(self, job_id: str, error: str, traceback: str | None = None) -> None:
+    def add_to_dlq(
+        self, 
+        job_id: str,
+        error: str, 
+        traceback: str | None = None
+    ) -> None:
         """
         Add a failed job to the Dead Letter Queue.
 

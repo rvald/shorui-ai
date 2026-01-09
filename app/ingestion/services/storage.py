@@ -48,7 +48,11 @@ class StorageService:
             logger.warning(f"Could not ensure bucket '{bucket_name}' exists: {e}")
 
     def upload(
-        self, content: bytes, filename: str, project_id: str, bucket: str | None = None
+        self, 
+        content: bytes, 
+        filename: str, 
+        project_id: str, 
+        bucket: str | None = None
     ) -> str:
         """
         Upload a document to MinIO.

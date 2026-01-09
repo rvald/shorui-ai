@@ -29,7 +29,7 @@ class IndexingService:
         service.index(chunks, embeddings, metadata, "my_collection")
     """
 
-    def __init__(self, default_collection: str = "multimodal_data"):
+    def __init__(self, default_collection: str = "hipaa_regulations"):
         """
         Initialize the indexing service.
 
@@ -111,7 +111,10 @@ class IndexingService:
         return client.collection_exists(collection_name)
 
     def create_collection(
-        self, collection_name: str, vector_size: int = 1024, distance: Distance = Distance.COSINE
+        self, 
+        collection_name: str, 
+        vector_size: int = 1024, 
+        distance: Distance = Distance.COSINE
     ) -> None:
         """
         Create a new collection in Qdrant.
