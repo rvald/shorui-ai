@@ -1,0 +1,146 @@
+[project]
+name = "shorui-ai"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "bertopic>=0.17.3",
+    "celery[redis]>=5.5.3",
+    "fastapi[standard]>=0.115.0,<0.116.0",
+    "flower>=2.0.0",
+    "keybert>=0.9.0",
+    "langdetect>=1.0.9",
+    "langchain>=0.3.0",
+    "langchain-community>=0.4.1",
+    "langchain-openai>=0.2.0,<1.0.0",
+    "langchain-text-splitters>=0.2.0",
+    "loguru>=0.7.3",
+    "minio>=7.2.18",
+    "pdfminer.six>=20231228",
+    "pip>=24.0",
+    "psycopg[binary]>=3.2.12",
+    "pydantic>=2.0,<2.12",
+    "pydantic-settings>=2.4.0,<3.0.0",
+    "pypdf>=6.4.0",
+    "pytesseract>=0.3.10",
+    "qdrant-client>=1.16.0",
+    "requests>=2.32.5",
+    "scikit-learn>=1.7.2",
+    "sentence-transformers>=3.0.0",
+    "spacy>=3.8.11",
+    "zenml[server]>=0.64.0",
+    "langgraph>=1.0.3",
+    "langgraph-supervisor>=0.0.31",
+    "langchain-core>=1.1.0",
+    "pymupdf>=1.26.7",
+    "neo4j>=6.0.3",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+    "presidio-analyzer>=2.2",
+    "tiktoken>=0.7.0",
+    "httpx>=0.28.1",
+    "aiofiles>=25.1.0",
+    "python-multipart>=0.0.20",
+    "langchain-anthropic>=1.3.0",
+    "langchain-ollama>=1.0.1",
+    "poethepoet>=0.29.0",
+    "ruff>=0.8.0",
+    "nest-asyncio>=1.6.0",
+]
+
+
+# ----------------------------------
+# --- Poe the Poet Tasks ---
+# ----------------------------------
+
+[tool.poe.tasks]
+# === Development ===
+test = "uv run pytest tests/ -v"
+test-quick = "uv run pytest tests/ -v -x --tb=short"
+lint = "uv run ruff check ."
+lint-fix = "uv run ruff check . --fix"
+format = "uv run ruff format ."
+format-check = "uv run ruff format . --check"
+check = ["lint", "format-check"]
+
+# === Infrastructure ===
+start = "docker compose up -d"
+start-build = "docker compose up -d --build"
+stop = "docker compose down"
+restart = ["stop", "start"]
+logs = "docker logs -f shorui-ai"
+logs-worker = "docker logs -f shorui-ai-worker"
+
+# === Data Seeding ===
+
+[tool.poe.tasks.seed-docs]
+shell = """
+for f in docs/*.pdf; do
+    echo "Uploading: $f"
+    curl -X POST http://localhost:8082/ingest/documents \
+        -F "file=@$f" \
+        -F "project_id=default" \
+        -F "document_type=hipaa_regulation" \
+        -F "source=$(basename "$f" .pdf)"
+    echo ""
+done
+"""
+
+[tool.poe.tasks.seed]
+sequence = ["seed-docs"]
+
+# === Combined Workflows ===
+[tool.poe.tasks.setup]
+sequence = ["start-build", { shell = "echo 'Waiting for services...' && sleep 60" }, "seed"]
+
+# === Utilities ===
+[tool.poe.tasks.health]
+shell = "curl -s http://localhost:8082/health | python -m json.tool"
+
+[tool.poe.tasks.qdrant-stats]
+shell = "curl -s http://localhost:6335/collections | python -m json.tool"
+
+
+# ----------------------------------
+# --- Ruff Configuration ---
+# ----------------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+exclude = [
+    ".venv",
+    "__pycache__",
+    "*.egg-info",
+    ".git",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "W",   # pycodestyle warnings
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "UP046",  # Generic[T] syntax is valid and more readable
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E402"]  # Allow imports after sys.path manipulation
+"app/*/routes.py" = ["B008"]  # FastAPI File(...) / Form(...) pattern
+"app/ingestion/routes.py" = ["B008", "E402", "B904"]  # FastAPI patterns + mid-file imports
+"app/ingestion/services/embedding.py" = ["E402"]  # sys.path manipulation
+"app/ingestion/services/privacy_extraction.py" = ["B904"]  # Exception chaining
+"app/rag/routes.py" = ["B904"]  # Exception chaining in HTTP handlers
+"shorui_core/domain/base/*" = ["B904"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"

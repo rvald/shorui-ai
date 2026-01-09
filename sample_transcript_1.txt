@@ -1,0 +1,47 @@
+CLINICAL TRANSCRIPT
+Patient Name: Maria Gonzalez
+DOB: 03/15/1982
+SSN: 987-65-4321
+Health Plan Beneficiary Number: BCBS-445566778
+Address: 789 Pine Avenue, Suite 12, Chicago, IL 60614
+Phone: (312) 555-0147
+Email: m.gonzalez82@gmail.com
+Medical Record Number: MRN-99887766
+Date of Visit: 2024-12-28
+Attending Physician: Dr. Robert Chen, MD (NPI: 1234567890)
+
+Doctor: Good morning, Maria. I'm Dr. Chen. I see you were referred by Dr. Williams from Rush University Medical Center.
+Patient: Yes, Dr. Williams said I should see a specialist about my test results.
+
+Doctor: I've reviewed your labs from LabCorp dated December 20th. Your HIV test came back positive. I understand this must be difficult news.
+Patient: I... I suspected it might be. My ex-partner, David Martinez, told me he tested positive last month.
+
+Doctor: I'm sorry to hear that. We'll need to start you on antiretroviral therapy. Have you shared this diagnosis with anyone else?
+Patient: Only my sister, Ana Gonzalez, who lives at 456 Oak Street, Evanston, IL. She's been very supportive.
+
+Doctor: That's good to have support. Now, regarding your mental health, I see you're currently being treated for bipolar disorder at Northwestern Psychiatry Center. Are you still taking lithium?
+Patient: Yes, 900mg daily. I also see Dr. Patricia O'Connor for therapy every Tuesday at 3pm.
+
+Doctor: Perfect. We'll need to coordinate your HIV medications with your psychiatric care. I'm also noting you have a history of substance abuse - the records show you completed rehab at Hazelden Betty Ford in Minnesota in 2020.
+Patient: That's correct. I've been sober for 4 years now.
+
+Doctor: Excellent progress. Let me also verify - your emergency contact is your mother, Carmen Gonzalez, reachable at 555-0198?
+Patient: Yes, but please don't call her about the HIV diagnosis. I haven't told her yet.
+
+Doctor: Understood. We'll protect your privacy. Now, I'm prescribing Biktarvy. Your insurance, Blue Cross Blue Shield, policy number BCBS-2024-556677, should cover this.
+Patient: Thank you, Doctor.
+
+Doctor: One more thing - I noticed your employer, Chicago Public Schools, offers an employee wellness program. You might want to consider their mental health resources.
+Patient: I'd rather keep my work separate from this.
+
+Doctor: Of course. We'll schedule a follow-up for January 10th, 2025. The nurse will give you educational materials and the clinic contact: hivcare@chicagomed.org.
+
+[END OF TRANSCRIPT]
+
+S: Maria Gonzalez, 42-year-old female, newly diagnosed HIV positive. History of bipolar disorder (on lithium 900mg), substance abuse in remission since 2020. Referred from Rush University Medical Center.
+
+O: Labs from LabCorp 12/20 confirm HIV+ status. Current medications: lithium 900mg daily. Insurance: BCBS policy BCBS-2024-556677.
+
+A: Primary: HIV infection, newly diagnosed. Secondary: Bipolar disorder, stable. History of substance abuse, in remission.
+
+P: 1. Start Biktarvy for HIV. 2. Coordinate with psychiatrist Dr. O'Connor regarding drug interactions. 3. Follow-up January 10, 2025. 4. Patient education provided. 5. HIPAA authorization signed - restrictions noted on contacting mother Carmen Gonzalez.
