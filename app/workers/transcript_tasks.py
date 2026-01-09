@@ -9,6 +9,7 @@ import asyncio
 
 from loguru import logger
 
+from app.ingestion.services.job_ledger import JobLedgerService
 from app.workers.celery_app import celery_app
 
 
@@ -51,10 +52,44 @@ def analyze_clinical_transcript(
     """
     logger.info(f"[{job_id}] Starting transcript analysis for {filename}")
 
+    # Initialize ledger for audit trail
+    ledger_service = JobLedgerService()
+
+    # Record job start in ledger (for audit/posterity)
+    try:
+        content_hash = ledger_service.compute_content_hash(text.encode("utf-8"))
+        ledger_service.create_job(
+            project_id=project_id,
+            filename=filename,
+            storage_path=f"transcript:{job_id}",  # Virtual path for transcripts
+            content_hash=content_hash,
+            job_id=job_id,
+        )
+        ledger_service.update_status(job_id, "processing", progress=10)
+    except Exception as e:
+        logger.warning(f"[{job_id}] Ledger create failed (continuing): {e}")
+
     # Run async code in sync context
-    return asyncio.get_event_loop().run_until_complete(
+    result = asyncio.get_event_loop().run_until_complete(
         _analyze_transcript_async(job_id, text, filename, project_id)
     )
+
+    # Record completion/failure in ledger (for audit/posterity)
+    try:
+        if result.get("status") == "completed":
+            ledger_service.complete_job(
+                job_id,
+                items_indexed=result.get("phi_detected", 0),
+            )
+        else:
+            ledger_service.fail_job(
+                job_id,
+                error=result.get("error", "Unknown error"),
+            )
+    except Exception as e:
+        logger.warning(f"[{job_id}] Ledger update failed: {e}")
+
+    return result
 
 
 async def _analyze_transcript_async(

@@ -19,11 +19,6 @@ from app.workers.transcript_tasks import analyze_clinical_transcript
 
 router = APIRouter()
 
-
-# Simple in-memory job storage (will be replaced by polling Celery/Redis)
-job_storage: dict = {}
-
-
 class JobStatus(BaseModel):
     """Response model for job status."""
 
@@ -92,7 +87,7 @@ async def upload_document(
  
     import sys
     print(f"DEBUG_PRINT: Processing upload for {filename}", file=sys.stderr)
-    
+
     try:
         from app.workers.tasks import process_document
         print(f"DEBUG_PRINT: Imported task {process_document.name}", file=sys.stderr)
@@ -104,17 +99,6 @@ async def upload_document(
 
     except Exception as e:
         print(f"DEBUG_PRINT: Error exploring task: {e}", file=sys.stderr)
-
-
-    # Initialize job status in local storage (for backwards compatibility)
-    job_storage[job_id] = {
-        "job_id": job_id,
-        "status": "pending",
-        "progress": 0,
-        "filename": filename,
-        "project_id": project_id,
-        "document_type": document_type,
-    }
 
     # Queue task via Celery with document_type for routing
     process_document.delay(
@@ -142,7 +126,7 @@ def get_document_status(job_id: str):
     """
     Get the processing status of an uploaded document.
 
-    First checks PostgreSQL ledger, then falls back to in-memory storage.
+    Queries the PostgreSQL job ledger for job status.
 
     Args:
         job_id: The job ID returned from the upload endpoint.
@@ -155,7 +139,6 @@ def get_document_status(job_id: str):
     """
     from app.ingestion.services.job_ledger import JobLedgerService
 
-    # Try to get from PostgreSQL ledger first
     try:
         ledger_service = JobLedgerService()
         job_info = ledger_service.get_job(job_id)
@@ -173,16 +156,13 @@ def get_document_status(job_id: str):
                 if job_info.get("items_indexed")
                 else None,
             )
+        else:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.warning(f"Failed to fetch job from ledger: {e}")
-
-    # Fall back to in-memory storage (for backwards compatibility)
-    job_info = job_storage.get(job_id)
-
-    if job_info is None:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-
-    return JobStatus(**job_info)
 
 
 # ==============================================================================
@@ -298,14 +278,6 @@ async def upload_clinical_transcript(
     )
 
     logger.info(f"[{job_id}] Queued transcript analysis via Celery")
-
-    # Store job in local storage for backwards compatibility
-    job_storage[job_id] = {
-        "job_id": job_id,
-        "status": "pending",
-        "filename": filename,
-        "project_id": project_id,
-    }
 
     return TranscriptJobResponse(
         job_id=job_id,
