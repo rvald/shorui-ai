@@ -22,6 +22,7 @@ from app.ingestion.services.context_optimizer import (
     build_optimized_batches,
 )
 from app.compliance.services.phi_detector import get_phi_detector
+from app.compliance.services.regulation_retriever import RegulationRetriever
 from shorui_core.config import settings
 from shorui_core.domain.hipaa_schemas import (
     AuditEventType,
@@ -152,8 +153,17 @@ class PrivacyAwareExtractionService:
         """
         self.phi_detector = get_phi_detector(min_confidence=phi_confidence_threshold)
 
+        # Regulation retriever for RAG-grounded compliance analysis
+        self._regulation_retriever: RegulationRetriever | None = None
+
         # Audit service for tamper-evident logging
         self._audit_service = AuditService() if AuditService else None
+
+    def _get_regulation_retriever(self) -> RegulationRetriever:
+        """Get or create the regulation retriever (lazy initialization)."""
+        if self._regulation_retriever is None:
+            self._regulation_retriever = RegulationRetriever()
+        return self._regulation_retriever
 
     async def extract(
         self,
@@ -287,6 +297,17 @@ class PrivacyAwareExtractionService:
                 requires_immediate_action=any(a.severity == "CRITICAL" for a in cached_analyses),
             )
 
+        # Retrieve relevant HIPAA regulations for RAG-grounded analysis
+        regulations_context = ""
+        try:
+            retriever = self._get_regulation_retriever()
+            regulations = retriever.retrieve_for_context(llm_spans, top_k=5)
+            if regulations:
+                regulations_context = retriever.format_for_prompt(regulations, max_chars=2000)
+                logger.info(f"Retrieved {len(regulations)} HIPAA regulations for context")
+        except Exception as e:
+            logger.warning(f"Failed to retrieve regulations (continuing without): {e}")
+
         # Build token-optimized batches with PHI deduplication
         batches = build_optimized_batches(
             phi_spans=llm_spans,
@@ -304,6 +325,11 @@ class PrivacyAwareExtractionService:
                 contexts=batch,
                 system_prompt=COMPLIANCE_SYSTEM_PROMPT,
             )
+            
+            # Append retrieved regulations to prompt for RAG-grounded analysis
+            if regulations_context:
+                user_prompt = f"{user_prompt}\n\n{regulations_context}"
+            
             logger.debug(
                 f"Batch {batch_idx + 1}/{len(batches)}: {len(batch)} PHI groups, {input_tokens} input tokens"
             )
