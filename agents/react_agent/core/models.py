@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Union
 import json
 import re
 import uuid
+import asyncio
 
 from pydantic import BaseModel, Field
 
@@ -198,6 +199,37 @@ class Model(ABC):
         """Allow calling model instance directly."""
         return self.generate(messages, **kwargs)
 
+class AsyncModel(ABC):
+    """
+    Abstract base class for async language model implementations.
+    
+    Extends Model with async capabilities for non-blocking I/O.
+    Models should inherit from both Model and AsyncModel to support
+    both sync and async usage patterns.
+    """
+    
+    @abstractmethod
+    async def generate_async(
+        self,
+        messages: List[ChatMessage],
+        stop_sequences: Optional[List[str]] = None,
+        tools: Optional[List[dict]] = None,
+        **kwargs,
+    ) -> ChatMessage:
+        """
+        Generate a response asynchronously.
+        
+        Args:
+            messages: List of chat messages forming the conversation
+            stop_sequences: Optional list of strings that stop generation
+            tools: Optional list of tool schemas for native tool calling
+            **kwargs: Additional model-specific parameters
+            
+        Returns:
+            ChatMessage with the model's response
+        """
+        ...  
+
 
 class MockModel(Model):
     """
@@ -240,7 +272,7 @@ class MockModel(Model):
         return response
 
 
-class OpenAIModel(Model):
+class OpenAIModel(Model, AsyncModel):
     """
     OpenAI API model implementation.
     
@@ -266,6 +298,10 @@ class OpenAIModel(Model):
         self.model_id = model_id
         self.temperature = temperature
         self.max_tokens = max_tokens
+
+        # Add these lines for async support
+        from openai import AsyncOpenAI
+        self._async_client = AsyncOpenAI(api_key=self.api_key)
         
     def generate(
         self,
@@ -300,6 +336,61 @@ class OpenAIModel(Model):
             params["tool_choice"] = "auto"
         
         response = client.chat.completions.create(**params)
+        choice = response.choices[0]
+        
+        # Parse tool calls if present
+        tool_calls = None
+        if choice.message.tool_calls:
+            tool_calls = [
+                ChatMessageToolCall(
+                    id=tc.id,
+                    function=ToolCallFunction(
+                        name=tc.function.name,
+                        arguments=json.loads(tc.function.arguments) if isinstance(tc.function.arguments, str) else tc.function.arguments
+                    )
+                )
+                for tc in choice.message.tool_calls
+            ]
+        
+        return ChatMessage(
+            role="assistant",
+            content=choice.message.content,
+            tool_calls=tool_calls,
+        )
+
+    async def generate_async(
+        self,
+        messages: List[ChatMessage],
+        stop_sequences: Optional[List[str]] = None,
+        tools: Optional[List[dict]] = None,
+        **kwargs,
+    ) -> ChatMessage:
+        """Async generation using OpenAI async client."""
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise ImportError("Install openai: pip install openai")
+        
+        # Convert messages to OpenAI format
+        openai_messages = [msg.to_dict() for msg in messages]
+        
+        # Build request params
+        params = {
+            "model": self.model_id,
+            "messages": openai_messages,
+            "temperature": kwargs.get("temperature", self.temperature),
+            "max_tokens": kwargs.get("max_tokens", self.max_tokens),
+        }
+        
+        if stop_sequences:
+            params["stop"] = stop_sequences
+            
+        if tools:
+            params["tools"] = tools
+            params["tool_choice"] = "auto"
+        
+        # Async API call
+        response = await self._async_client.chat.completions.create(**params)
         choice = response.choices[0]
         
         # Parse tool calls if present
