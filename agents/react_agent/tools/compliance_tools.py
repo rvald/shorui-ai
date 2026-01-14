@@ -513,3 +513,110 @@ class LookupHIPAARegulationTool(Tool):
         except Exception as e:
             return f"Error looking up regulation: {e}"
 
+
+class QueryHIPAARegulationsRAGTool(Tool):
+    """
+    Query HIPAA regulations using RAG (Retrieval-Augmented Generation).
+    
+    Uses the /rag/query endpoint which:
+    1. Retrieves relevant regulation text from Qdrant
+    2. Generates a grounded answer using LLM with the retrieved context
+    3. Returns the answer with source citations
+    
+    This is preferred over LookupHIPAARegulationTool because:
+    - Answers are grounded in actual regulation text
+    - LLM synthesizes information from multiple sources
+    - Sources are cited for verification
+    
+    Example:
+        tool = QueryHIPAARegulationsRAGTool()
+        result = tool(question="What are the 18 HIPAA identifiers?", project_id="default")
+        # Returns grounded answer with sources
+    """
+    
+    name = "query_hipaa_regulations"
+    description = (
+        "Ask a question about HIPAA regulations and get a grounded answer with sources. "
+        "The answer is generated based on actual HIPAA regulation text, not general knowledge. "
+        "Use for questions about Privacy Rule, Security Rule, de-identification, PHI handling, "
+        "breach notification, patient rights, and other HIPAA topics."
+    )
+    inputs = {
+        "question": {
+            "type": "string",
+            "description": "The HIPAA-related question to answer"
+        },
+        "project_id": {
+            "type": "string",
+            "description": "Project identifier (use 'default' if unsure)",
+            "nullable": True,
+        },
+        "num_sources": {
+            "type": "integer",
+            "description": "Number of regulation sources to retrieve (default: 5)",
+            "nullable": True,
+        }
+    }
+    output_type = "string"
+    
+    def __init__(self, client=None):
+        """
+        Initialize the tool.
+        
+        Args:
+            client: Optional RAGClient instance. If None, creates one lazily.
+        """
+        self._client = client
+    
+    def _get_client(self):
+        """Get or create the RAGClient instance."""
+        if self._client is None:
+            try:
+                from ..infrastructure.http_clients import RAGClient
+            except ImportError:
+                from infrastructure.http_clients import RAGClient
+            self._client = RAGClient()
+        return self._client
+    
+    def forward(
+        self,
+        question: str,
+        project_id: Optional[str] = None,
+        num_sources: Optional[int] = None,
+    ) -> str:
+        """Query HIPAA regulations and get a grounded answer."""
+        client = self._get_client()
+        
+        # Always use hipaa_regulations collection for this tool
+        # (ignore project_id - this tool is specifically for HIPAA regulations)
+        collection = "hipaa_regulations"
+        num_sources = num_sources or 5
+        
+        try:
+            # Call RAG endpoint with hipaa_regulations collection
+            result = client.query(
+                query=question,
+                project_id=collection,  # Uses hipaa_regulations
+                k=num_sources,
+                backend="openai",
+            )
+            
+            answer = result.get("answer", "No answer generated")
+            sources = result.get("sources", [])
+            
+            # Format response with sources
+            output = f"## Answer\n\n{answer}\n\n"
+            
+            if sources:
+                output += "## Sources\n\n"
+                for i, source in enumerate(sources, 1):
+                    filename = source.get("filename", "Unknown")
+                    page = source.get("page_num", "?")
+                    preview = source.get("content_preview", "")[:150]
+                    output += f"{i}. **{filename}** (page {page})\n"
+                    output += f"   {preview}...\n\n"
+            
+            return output.strip()
+            
+        except Exception as e:
+            return f"Error querying HIPAA regulations: {e}"
