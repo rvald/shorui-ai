@@ -2,7 +2,6 @@
 
 **HIPAA Compliance Assistant** — AI-powered clinical transcript analysis with PHI detection and regulatory grounding.
 
-![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.13-blue.svg)
 ![React](https://img.shields.io/badge/react-19-blue.svg)
 
@@ -58,13 +57,13 @@ flowchart TB
     Agent --> Redis
 ```
 
-## Quick Start (macOS)
+## Quick Start
 
 ### Prerequisites
 
-- **Docker Desktop for Mac** — [Download here](https://www.docker.com/products/docker-desktop/)
+- **Docker Desktop** — [Download here](https://www.docker.com/products/docker-desktop/)
 - **Node.js 18+** — Install via [Homebrew](https://brew.sh): `brew install node`
-- **uv** (Python package manager) — `brew install uv`
+- **uv** (Python package manager) — `brew install uv` or `pip install uv`
 - **OpenAI API Key** — [Get one here](https://platform.openai.com/api-keys)
 
 ### 1. Clone and Setup
@@ -160,13 +159,30 @@ The project uses [Poe the Poet](https://github.com/nat-n/poethepoet) for task ru
 
 ```bash
 uv run poe --help        # Show all available commands
-uv run poe setup         # Full setup: build, start, and seed
+
+# Development
+uv run poe test          # Run unit tests
+uv run poe test-quick    # Run tests (stop on first failure)
+uv run poe e2e           # Run end-to-end tests
+uv run poe e2e-quick     # Run quick health check only
+uv run poe lint          # Check code style
+uv run poe format        # Format code
+
+# Infrastructure
 uv run poe start         # Start all Docker services
 uv run poe start-build   # Start with full rebuild
 uv run poe stop          # Stop all services
+uv run poe restart       # Restart all services
 uv run poe logs          # Follow backend logs
+uv run poe logs-worker   # Follow Celery worker logs
+
+# Data
 uv run poe seed          # Seed HIPAA regulations from docs/
-uv run poe test          # Run tests
+uv run poe setup         # Full setup: build, start, and seed
+
+# Utilities
+uv run poe health        # Check API health
+uv run poe qdrant-stats  # Get Qdrant collection stats
 ```
 
 ---
@@ -177,16 +193,19 @@ uv run poe test          # Run tests
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/sessions` | Create new agent session |
-| `POST` | `/sessions/{id}/messages` | Send message (with optional file upload) |
+| `POST` | `/agent/sessions` | Create new agent session |
+| `POST` | `/agent/sessions/{id}/messages` | Send message (with optional file upload) |
 
 ### Ingestion (`/ingest/...`)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| `GET` | `/health` | Health check |
 | `POST` | `/documents` | Upload documents (general or HIPAA regulations) |
+| `GET` | `/documents/{job_id}/status` | Check document processing status |
 | `POST` | `/clinical-transcripts` | Upload transcript for compliance analysis |
-| `GET` | `/clinical-transcripts/{id}/compliance-report` | Get stored report |
+| `GET` | `/clinical-transcripts/jobs/{job_id}` | Check transcript analysis status |
+| `GET` | `/clinical-transcripts/{id}/compliance-report` | Get stored compliance report |
 | `GET` | `/hipaa-regulations/stats` | Get regulation collection stats |
 | `GET` | `/audit-log` | Query audit events |
 
@@ -194,6 +213,7 @@ uv run poe test          # Run tests
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
+| `GET` | `/health` | Health check |
 | `POST` | `/query` | Full RAG: retrieve + generate answer |
 | `GET` | `/search` | Search documents without LLM |
 
@@ -205,7 +225,7 @@ uv run poe test          # Run tests
 |---------|------|---------|
 | Backend API | 8082 | FastAPI application |
 | Frontend | 5173 | React/Vite dev server |
-| Qdrant | 6334 | Vector database |
+| Qdrant | 6335 | Vector database |
 | Neo4j | 7474/7687 | Graph database |
 | PostgreSQL | 5432 | Relational database |
 | Redis | 6379 | Session storage & task queue |
@@ -223,7 +243,8 @@ shorui-ai/
 │   ├── main.py            # Application entry point
 │   ├── agent/             # AI Agent service (ReAct agent)
 │   │   ├── routes.py      # Agent API endpoints
-│   │   └── service.py     # Session management (Redis-backed)
+│   │   ├── service.py     # Sync session management (Redis)
+│   │   └── async_service.py  # Async session management (in-memory)
 │   ├── compliance/        # HIPAA compliance services
 │   │   └── services/      # PHI detection, reports, audit
 │   ├── ingestion/         # Document/transcript ingestion
@@ -245,6 +266,10 @@ shorui-ai/
 │   ├── config.py          # Settings
 │   ├── domain/            # Pydantic schemas
 │   └── infrastructure/    # Database connectors
+├── scripts/               # Utility scripts
+│   ├── e2e_test.py       # End-to-end test suite
+│   └── extract_safe_harbor.py  # PDF extraction utility
+├── tests/                 # Unit and integration tests
 ├── docs/                  # HIPAA regulation PDFs (for seeding)
 ├── docker-compose.yml     # Service definitions
 ├── Dockerfile            
@@ -276,8 +301,14 @@ Test files are included in the repository:
 ### Running Tests
 
 ```bash
-# Run all tests
+# Run unit tests
 uv run poe test
+
+# Run end-to-end tests (requires Docker services running)
+uv run poe e2e
+
+# Run quick smoke tests
+uv run poe e2e-quick
 
 # Run with coverage
 uv run pytest tests/ -v --cov=app
@@ -311,8 +342,9 @@ cd frontend && npm run dev
 
 ### Transcript analysis timing out
 
-1. Ensure backend is running with 4 workers (check `Dockerfile`)
+1. Check Celery worker is running: `docker compose ps worker`
 2. Check Redis is running: `docker compose ps redis`
+3. View worker logs: `uv run poe logs-worker`
 
 ### Frontend can't connect to backend
 
@@ -324,12 +356,9 @@ cd frontend && npm run dev
 1. Ensure you've seeded HIPAA regulations: `uv run poe seed`
 2. Check Qdrant is running: `docker compose ps qdrant`
 
----
+### E2E tests failing
 
-## License
+1. Run quick health check: `uv run poe e2e-quick`
+2. Ensure services are running: `uv run poe start`
+3. Seed regulations if needed: `uv run poe seed`
 
-MIT License — see [LICENSE](LICENSE) for details.
-
-## Contributing
-
-Contributions are welcome! Please read our contributing guidelines before submitting a PR.
