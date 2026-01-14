@@ -58,6 +58,8 @@ dependencies = [
 # === Development ===
 test = "uv run pytest tests/ -v"
 test-quick = "uv run pytest tests/ -v -x --tb=short"
+e2e = "uv run python scripts/e2e_test.py"
+e2e-quick = "uv run python scripts/e2e_test.py --quick"
 lint = "uv run ruff check ."
 lint-fix = "uv run ruff check . --fix"
 format = "uv run ruff format ."
