@@ -5,6 +5,8 @@ The QueryProcessor should:
 1. Extract keywords from queries (SelfQuery)
 2. Detect intent (general vs gap_analysis)
 3. Expand queries into multiple search queries
+
+Uses OpenAI client singleton for LLM calls.
 """
 
 from unittest.mock import MagicMock, patch
@@ -15,12 +17,19 @@ import pytest
 class TestSelfQueryExtraction:
     """Tests for keyword and intent extraction."""
 
-    def test_extract_keywords_from_query(self, mock_openai_chain):
+    def test_extract_keywords_from_query(self, mock_openai_client):
         """Should extract relevant keywords from the query."""
         from app.rag.services.query_processor import QueryProcessor
 
-        mock_openai_chain.invoke.return_value = MagicMock(
-            content='{"keywords": ["foundation", "concrete", "materials"], "intent": "general"}'
+        # Mock OpenAI response
+        mock_openai_client.chat.completions.create.return_value = MagicMock(
+            choices=[
+                MagicMock(
+                    message=MagicMock(
+                        content='{"keywords": ["foundation", "concrete", "materials"], "intent": "general"}'
+                    )
+                )
+            ]
         )
 
         processor = QueryProcessor()
@@ -29,12 +38,18 @@ class TestSelfQueryExtraction:
         assert "keywords" in result
         assert "foundation" in result["keywords"]
 
-    def test_detect_gap_analysis_intent(self, mock_openai_chain):
+    def test_detect_gap_analysis_intent(self, mock_openai_client):
         """Should detect gap analysis queries."""
         from app.rag.services.query_processor import QueryProcessor
 
-        mock_openai_chain.invoke.return_value = MagicMock(
-            content='{"keywords": ["missing", "gaps"], "intent": "gap_analysis"}'
+        mock_openai_client.chat.completions.create.return_value = MagicMock(
+            choices=[
+                MagicMock(
+                    message=MagicMock(
+                        content='{"keywords": ["missing", "gaps"], "intent": "gap_analysis"}'
+                    )
+                )
+            ]
         )
 
         processor = QueryProcessor()
@@ -43,12 +58,16 @@ class TestSelfQueryExtraction:
         assert result["intent"] == "gap_analysis"
         assert result["is_gap_query"]
 
-    def test_general_intent_default(self, mock_openai_chain):
+    def test_general_intent_default(self, mock_openai_client):
         """Default intent should be general."""
         from app.rag.services.query_processor import QueryProcessor
 
-        mock_openai_chain.invoke.return_value = MagicMock(
-            content='{"keywords": ["cost"], "intent": "general"}'
+        mock_openai_client.chat.completions.create.return_value = MagicMock(
+            choices=[
+                MagicMock(
+                    message=MagicMock(content='{"keywords": ["cost"], "intent": "general"}')
+                )
+            ]
         )
 
         processor = QueryProcessor()
@@ -61,12 +80,18 @@ class TestSelfQueryExtraction:
 class TestQueryExpansion:
     """Tests for query expansion."""
 
-    def test_expand_query_returns_multiple(self, mock_openai_chain):
+    def test_expand_query_returns_multiple(self, mock_openai_client):
         """Should return multiple expanded queries."""
         from app.rag.services.query_processor import QueryProcessor
 
-        mock_openai_chain.invoke.return_value = MagicMock(
-            content="What materials for foundation?\n#\nFoundation material specifications\n#\nConcrete requirements for foundation"
+        mock_openai_client.chat.completions.create.return_value = MagicMock(
+            choices=[
+                MagicMock(
+                    message=MagicMock(
+                        content="What materials for foundation?\n#\nFoundation material specifications\n#\nConcrete requirements for foundation"
+                    )
+                )
+            ]
         )
 
         processor = QueryProcessor()
@@ -75,11 +100,15 @@ class TestQueryExpansion:
         assert len(expanded) >= 3
         assert "foundation materials" in expanded  # Original included
 
-    def test_expand_includes_original_query(self, mock_openai_chain):
+    def test_expand_includes_original_query(self, mock_openai_client):
         """Expanded queries should include the original."""
         from app.rag.services.query_processor import QueryProcessor
 
-        mock_openai_chain.invoke.return_value = MagicMock(content="Alternative 1\n#\nAlternative 2")
+        mock_openai_client.chat.completions.create.return_value = MagicMock(
+            choices=[
+                MagicMock(message=MagicMock(content="Alternative 1\n#\nAlternative 2"))
+            ]
+        )
 
         processor = QueryProcessor()
         original = "test query"
@@ -101,14 +130,24 @@ class TestQueryExpansion:
 class TestFullProcessing:
     """Tests for combined processing."""
 
-    def test_process_returns_keywords_and_expanded(self, mock_openai_chain):
+    def test_process_returns_keywords_and_expanded(self, mock_openai_client):
         """Full processing should return both keywords and expanded queries."""
         from app.rag.services.query_processor import QueryProcessor
 
         # First call for keywords, second for expansion
-        mock_openai_chain.invoke.side_effect = [
-            MagicMock(content='{"keywords": ["materials"], "intent": "general"}'),
-            MagicMock(content="Alt 1\n#\nAlt 2"),
+        mock_openai_client.chat.completions.create.side_effect = [
+            MagicMock(
+                choices=[
+                    MagicMock(
+                        message=MagicMock(
+                            content='{"keywords": ["materials"], "intent": "general"}'
+                        )
+                    )
+                ]
+            ),
+            MagicMock(
+                choices=[MagicMock(message=MagicMock(content="Alt 1\n#\nAlt 2"))]
+            ),
         ]
 
         processor = QueryProcessor()
@@ -123,22 +162,11 @@ class TestFullProcessing:
 
 
 @pytest.fixture
-def mock_openai_chain():
-    """Mock the OpenAI LangChain components."""
-    with (
-        patch("app.rag.services.query_processor.ChatOpenAI") as mock_chat,
-        patch("app.rag.services.query_processor.ChatPromptTemplate") as mock_template,
-    ):
-        # Create mock model
-        mock_model = MagicMock()
-        mock_chat.return_value = mock_model
-
-        # Create mock prompt
-        mock_prompt = MagicMock()
-        mock_template.from_messages.return_value = mock_prompt
-
-        # Create a mock chain that is returned when prompt | model
-        mock_chain = MagicMock()
-        mock_prompt.__or__ = MagicMock(return_value=mock_chain)
-
-        yield mock_chain
+def mock_openai_client():
+    """Mock the OpenAI client singleton."""
+    with patch(
+        "app.rag.services.query_processor.get_openai_client"
+    ) as mock_get_client:
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        yield mock_client

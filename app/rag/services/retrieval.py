@@ -90,8 +90,8 @@ class RetrievalService:
         """
         logger.info(f"Full retrieval for: '{query}' in project '{project_id}'")
 
-        # 1. Pre-retrieval: extract keywords and expand queries
-        query_info = self._query_processor.process(query, expand_to_n=expand_queries)
+        # 1. Pre-retrieval: extract keywords and expand queries (PARALLEL)
+        query_info = await self._query_processor.process_async(query, expand_to_n=expand_queries)
         keywords = query_info["keywords"]
         is_gap_query = query_info["is_gap_query"]
         expanded_queries = query_info["expanded_queries"]
@@ -100,10 +100,18 @@ class RetrievalService:
             f"Keywords: {keywords}, Intent: {query_info['intent']}, Queries: {len(expanded_queries)}"
         )
 
-        # 2. Retrieval: search with all expanded queries
+        # 2. Retrieval: search with all expanded queries IN PARALLEL
+        import asyncio
+        
+        search_tasks = [
+            self._search_single(search_query, project_id, k)
+            for search_query in expanded_queries
+        ]
+        search_results = await asyncio.gather(*search_tasks)
+        
+        # Flatten results from all queries
         all_results = []
-        for search_query in expanded_queries:
-            results = await self._search_single(search_query, project_id, k)
+        for results in search_results:
             all_results.extend(results)
 
         # 3. Deduplicate by ID

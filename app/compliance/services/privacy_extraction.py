@@ -392,7 +392,9 @@ class PrivacyAwareExtractionService:
         Uses GPT-4o-mini with responses.parse for guaranteed JSON schema compliance.
         """
         try:
-            client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            from shorui_core.infrastructure.openai_client import get_openai_client
+            
+            client = get_openai_client()
 
             logger.debug(f"OpenAI request: {len(user_prompt)} chars prompt")
 

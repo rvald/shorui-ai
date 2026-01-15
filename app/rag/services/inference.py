@@ -82,18 +82,22 @@ class InferenceService:
         )
 
     def _get_openai_client(self):
-        """Get the OpenAI client (lazy initialization)."""
+        """Get the OpenAI client (uses singleton for connection reuse)."""
         if self._client is None:
             if OpenAI is None:
                 raise ImportError("openai package is required for InferenceService")
 
-            kwargs = {}
-            if self._api_key:
-                kwargs["api_key"] = self._api_key
-            if self._base_url:
-                kwargs["base_url"] = self._base_url
-
-            self._client = OpenAI(**kwargs)
+            # Use custom settings if provided, otherwise use singleton
+            if self._api_key or self._base_url:
+                kwargs = {}
+                if self._api_key:
+                    kwargs["api_key"] = self._api_key
+                if self._base_url:
+                    kwargs["base_url"] = self._base_url
+                self._client = OpenAI(**kwargs)
+            else:
+                from shorui_core.infrastructure.openai_client import get_openai_client
+                self._client = get_openai_client()
         return self._client
 
     async def generate(

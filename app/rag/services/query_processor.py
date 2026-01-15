@@ -4,6 +4,8 @@ QueryProcessor: Pre-retrieval processing for RAG queries.
 This service handles:
 1. SelfQuery: Extract keywords and detect intent
 2. QueryExpansion: Generate multiple search queries
+
+Uses OpenAI client singleton for connection reuse.
 """
 
 import json
@@ -12,14 +14,7 @@ from typing import Any
 from loguru import logger
 
 from shorui_core.config import settings
-
-try:
-    from langchain_core.prompts import ChatPromptTemplate
-    from langchain_openai import ChatOpenAI
-
-    HAS_LANGCHAIN = True
-except ImportError:
-    HAS_LANGCHAIN = False
+from shorui_core.infrastructure.openai_client import get_openai_client
 
 
 # --- Prompt Templates ---
@@ -30,7 +25,7 @@ Given a user question, extract:
 2. intent: "compliance_check" (rules/violations), "policy_lookup" (procedures), "phi_analysis" (PHI handling), or "general"
 
 Respond with valid JSON only. Example format:
-{{"keywords": ["hipaa", "privacy_rule", "phi"], "intent": "compliance_check"}}
+{"keywords": ["hipaa", "privacy_rule", "phi"], "intent": "compliance_check"}
 """
 
 QUERY_EXPANSION_SYSTEM = """You are a search query generator.
@@ -54,35 +49,56 @@ class QueryProcessor:
     Combines SelfQuery (keyword/intent extraction) and
     QueryExpansion (multi-query generation) for better retrieval.
 
+    Uses OpenAI client singleton for efficient connection reuse.
+
     Usage:
         processor = QueryProcessor()
         result = processor.process("What materials for foundation?", expand_to_n=3)
         # result: {"keywords": [...], "intent": "general", "expanded_queries": [...]}
     """
 
-    def __init__(self, mock: bool = False, model: str = None, api_key: str | None = None):
+    def __init__(self, mock: bool = False, model: str = None):
         """
         Initialize the query processor.
 
         Args:
             mock: If True, skip LLM calls and return defaults.
             model: OpenAI model to use (defaults to config).
-            api_key: OpenAI API key (uses config if not provided).
         """
         self._mock = mock
         self._model = model or settings.OPENAI_MODEL_ID
-        self._api_key = api_key or settings.OPENAI_API_KEY
 
-    def _get_llm(self, temperature: float = 0, json_mode: bool = False):
-        """Get a configured LLM instance."""
-        if not HAS_LANGCHAIN:
-            raise ImportError("langchain-openai is required for QueryProcessor")
+    def _call_openai(
+        self, system_prompt: str, user_message: str, temperature: float = 0, json_mode: bool = False
+    ) -> str:
+        """
+        Call OpenAI API using the singleton client.
 
-        kwargs = {"model": self._model, "api_key": self._api_key, "temperature": temperature}
+        Args:
+            system_prompt: System prompt for the LLM.
+            user_message: User message to process.
+            temperature: LLM temperature (0 = deterministic).
+            json_mode: If True, request JSON response format.
+
+        Returns:
+            The LLM response content as a string.
+        """
+        client = get_openai_client()
+
+        kwargs = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": temperature,
+        }
+
         if json_mode:
-            kwargs["model_kwargs"] = {"response_format": {"type": "json_object"}}
+            kwargs["response_format"] = {"type": "json_object"}
 
-        return ChatOpenAI(**kwargs)
+        response = client.chat.completions.create(**kwargs)
+        return response.choices[0].message.content
 
     def extract_keywords(self, query: str) -> dict[str, Any]:
         """
@@ -104,15 +120,14 @@ class QueryProcessor:
         logger.info(f"Extracting keywords from: '{query}'")
 
         try:
-            prompt = ChatPromptTemplate.from_messages(
-                [("system", SELF_QUERY_SYSTEM), ("user", "{question}")]
+            response = self._call_openai(
+                system_prompt=SELF_QUERY_SYSTEM,
+                user_message=query,
+                temperature=0,
+                json_mode=True,
             )
 
-            llm = self._get_llm(temperature=0, json_mode=True)
-            chain = prompt | llm
-
-            response = chain.invoke({"question": query})
-            data = json.loads(response.content)
+            data = json.loads(response)
 
             keywords = data.get("keywords", [])
             intent = data.get("intent", "general")
@@ -143,17 +158,14 @@ class QueryProcessor:
         logger.info(f"Expanding query to {n} variations")
 
         try:
-            prompt = ChatPromptTemplate.from_messages(
-                [("system", QUERY_EXPANSION_SYSTEM.format(n=n - 1)), ("user", "{question}")]
+            response = self._call_openai(
+                system_prompt=QUERY_EXPANSION_SYSTEM.format(n=n - 1),
+                user_message=query,
+                temperature=0.3,
             )
 
-            llm = self._get_llm(temperature=0.3)
-            chain = prompt | llm
-
-            response = chain.invoke({"question": query})
-
             # Parse response (separated by #)
-            alternatives = [alt.strip() for alt in response.content.split("#") if alt.strip()]
+            alternatives = [alt.strip() for alt in response.split("#") if alt.strip()]
 
             # Include original first
             expanded = [query] + alternatives[: n - 1]
@@ -181,5 +193,29 @@ class QueryProcessor:
 
         # Expand queries
         expanded = self.expand_query(query, n=expand_to_n)
+
+        return {**extraction, "expanded_queries": expanded, "original_query": query}
+
+    async def process_async(self, query: str, expand_to_n: int = 3) -> dict[str, Any]:
+        """
+        Async query processing: runs keyword extraction and query expansion in PARALLEL.
+
+        Same as process() but uses asyncio to run both LLM calls concurrently,
+        reducing latency by ~50% compared to sequential execution.
+
+        Args:
+            query: The user's search query.
+            expand_to_n: Number of query variations to generate.
+
+        Returns:
+            Dict with: keywords, intent, is_gap_query, expanded_queries
+        """
+        import asyncio
+
+        # Run both LLM calls in parallel using thread pool
+        extraction_task = asyncio.to_thread(self.extract_keywords, query)
+        expansion_task = asyncio.to_thread(self.expand_query, query, expand_to_n)
+
+        extraction, expanded = await asyncio.gather(extraction_task, expansion_task)
 
         return {**extraction, "expanded_queries": expanded, "original_query": query}
