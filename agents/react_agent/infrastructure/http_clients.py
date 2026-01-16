@@ -197,7 +197,12 @@ class RAGClient:
     """
     Synchronous client for the RAG (Retrieval-Augmented Generation) Service.
     
-    Handles semantic search over ingested documents.
+    Provides two main methods:
+    - search(): Retrieval-only, returns raw documents (free, fast, for debugging)
+    - query(): Full RAG, returns AI-generated answer (costs tokens, slower)
+    
+    For agent tools, use query() to get grounded answers.
+    For debugging retrieval quality, use search().
     """
     
     def __init__(self, base_url: str = RAG_BASE_URL, timeout: float = DEFAULT_TIMEOUT):
@@ -211,7 +216,14 @@ class RAGClient:
         k: int = 5,
     ) -> dict[str, Any]:
         """
-        Semantic search over documents.
+        RETRIEVAL ONLY: Semantic search over documents without LLM generation.
+        
+        Use this for:
+        - Debugging retrieval quality
+        - Exploring indexed documents
+        - Building custom RAG pipelines
+        
+        For AI-generated answers, use query() instead.
         
         Args:
             query: Natural language query
@@ -219,7 +231,7 @@ class RAGClient:
             k: Number of results to return
             
         Returns:
-            dict with search results
+            dict with 'results' list containing document chunks
         """
         with httpx.Client(timeout=self.timeout) as client:
             response = client.get(
@@ -241,16 +253,21 @@ class RAGClient:
         backend: str = "openai",
     ) -> dict[str, Any]:
         """
-        Full RAG query - retrieve + generate answer.
+        FULL RAG: Retrieve documents and generate an AI answer.
+        
+        This is the primary method for agent tools. It:
+        1. Searches for relevant documents in Qdrant
+        2. Passes them as context to the LLM
+        3. Returns a grounded answer with sources
         
         Args:
             query: Natural language question
-            project_id: Project identifier
-            k: Number of documents to retrieve
-            backend: LLM backend ("openai" or "runpod")
+            project_id: Project identifier (e.g., 'default', 'hipaa_regulations')
+            k: Number of documents to retrieve for context
+            backend: LLM backend ('openai' or 'runpod')
             
         Returns:
-            dict with answer and sources
+            dict with 'answer' (str) and 'sources' (list)
         """
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(

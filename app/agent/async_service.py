@@ -1,115 +1,57 @@
 """
-Simplified Async Agent Service
+Async Agent Service with LangGraph Integration
 
-Uses ReActAgent directly as the orchestrator with 2 tools:
-- AnalyzeClinicalTranscriptTool: PHI detection via backend
-- QueryHIPAARegulationsRAGTool: HIPAA questions via RAG
-
-No router needed - the agent decides which tool(s) to use.
+Uses LangGraph ReAct workflow for HIPAA compliance queries.
+The workflow handles tool selection and execution automatically.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 import uuid
 from typing import Any, Dict, List, Optional
 
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from loguru import logger
 
 
-# Lazy-loaded global agent instance
-_agent = None
+# Lazy-loaded global workflow instance
+_workflow = None
 _conversations: Dict[str, List[dict]] = {}  # session_id -> message history
 
 
-def _get_tools():
-    """Get the 2 core tools for HIPAA compliance."""
-    try:
-        from agents.react_agent.tools.compliance_tools import (
-            AnalyzeClinicalTranscriptTool,
-            QueryHIPAARegulationsRAGTool,
-        )
-        
-        return [
-            AnalyzeClinicalTranscriptTool(),
-            QueryHIPAARegulationsRAGTool(),
-        ]
-    except ImportError as e:
-        logger.error(f"Could not import tools: {e}")
-        return []
-
-
-def _get_model():
-    """Get LLM model for agent execution."""
-    try:
-        from agents.react_agent.core.models import OpenAIModel
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            logger.warning("OPENAI_API_KEY not set, agent will use mock responses")
-            return None
-        return OpenAIModel(api_key=api_key)
-    except ImportError as e:
-        logger.error(f"Could not import OpenAIModel: {e}")
-        return None
-
-
-def get_agent():
+def get_workflow():
     """
-    Get or create the global ReActAgent instance.
+    Get or create the global AgentWorkflow instance.
     
     Uses lazy initialization to avoid import-time side effects.
     """
-    global _agent
+    global _workflow
     
-    if _agent is None:
-        from agents.react_agent.agent import ReActAgent
-        
-        tools = _get_tools()
-        model = _get_model()
-        
-        if model is None:
-            logger.error("Cannot create agent without model")
+    if _workflow is None:
+        try:
+            from agents.react_agent.workflow import AgentWorkflow
+            _workflow = AgentWorkflow()
+            logger.info("Created LangGraph AgentWorkflow")
+        except Exception as e:
+            logger.error(f"Failed to create AgentWorkflow: {e}")
             return None
-        
-        _agent = ReActAgent(
-            tools=tools,
-            model=model,
-            max_steps=10,
-            verbose=True,
-        )
-        
-        tool_names = [t.name for t in tools]
-        logger.info(f"Created ReActAgent with tools: {tool_names}")
     
-    return _agent
+    return _workflow
 
 
 class AsyncAgentService:
-    """
-    Simplified async agent service.
-    
-    Uses ReActAgent directly as orchestrator - no separate router or executors.
-    The agent decides which tool(s) to use based on the query.
-    
-    Example:
-    ```python
-    service = AsyncAgentService()
-    session_id = await service.create_session()
-    result = await service.send_message(session_id, "What is HIPAA Safe Harbor?")
-    ```
-    """
-    
+   
     def __init__(self):
         """Initialize service."""
-        self._agent = None
+        self._workflow = None
     
     @property
-    def agent(self):
-        """Get agent (lazy initialization)."""
-        if self._agent is None:
-            self._agent = get_agent()
-        return self._agent
+    def workflow(self):
+        """Get workflow (lazy initialization)."""
+        if self._workflow is None:
+            self._workflow = get_workflow()
+        return self._workflow
     
     async def create_session(self, metadata: Optional[dict] = None) -> str:
         """
@@ -134,7 +76,7 @@ class AsyncAgentService:
         file_paths: Optional[List[str]] = None,
     ) -> dict:
         """
-        Process user message with ReActAgent.
+        Process user message with LangGraph ReAct workflow.
         
         Args:
             session_id: Session ID
@@ -151,42 +93,33 @@ class AsyncAgentService:
         if session_id not in _conversations:
             _conversations[session_id] = []
         
-        # Build task with file context and conversation history
-        task = self._build_task(message, project_id, session_id, file_paths)
+        # Build user input with file context
+        user_input = self._build_user_input(message, project_id, file_paths)
         
-        # Get agent
-        agent = self.agent
-        if agent is None:
+        # Get workflow
+        workflow = self.workflow
+        if workflow is None:
             return {
-                "content": "Agent not configured. Please set OPENAI_API_KEY.",
+                "content": "Agent workflow not configured. Please check OPENAI_API_KEY.",
                 "steps": [],
             }
         
         try:
-            # Run agent (in thread pool since run() is sync)
-            if hasattr(agent, 'run_async'):
-                result = await agent.run_async(task)
-            else:
-                result = await asyncio.to_thread(agent.run, task)
+            # Run LangGraph workflow
+            result = await asyncio.to_thread(
+                workflow._invoke_impl,
+                user_input=user_input,
+                config=None,
+            )
             
-            # Extract output
-            output = result.output if isinstance(result.output, str) else str(result.output)
-            
-            # Format steps
-            steps = []
-            for i, step in enumerate(result.steps):
-                steps.append({
-                    "step_number": i + 1,
-                    "thought": getattr(step, "thought", None),
-                    "action": step.tool_call.name if hasattr(step, "tool_call") and step.tool_call else None,
-                    "observation": getattr(step, "observation", None),
-                })
+            # Extract output from LangGraph state
+            output, steps = self._parse_langgraph_result(result)
             
             # Store in conversation history
             _conversations[session_id].append({"role": "user", "content": message})
             _conversations[session_id].append({"role": "assistant", "content": output})
             
-            logger.info(f"Agent completed with {len(steps)} steps")
+            logger.info(f"Workflow completed with {len(steps)} steps")
             
             return {
                 "content": output,
@@ -194,60 +127,83 @@ class AsyncAgentService:
             }
             
         except Exception as e:
-            logger.exception(f"Agent error: {e}")
+            logger.exception(f"Workflow error: {e}")
             return {
                 "content": f"Error: {str(e)}",
                 "steps": [],
             }
     
-    def _build_task(
+    def _build_user_input(
         self,
         message: str,
         project_id: str,
-        session_id: str,
         file_paths: Optional[List[str]] = None,
     ) -> str:
         """
-        Build task string with context.
+        Build user input with context.
         
-        Includes:
-        - Previous conversation history (for multi-turn support)
-        - File paths for transcript analysis
-        - Project ID
+        Includes file paths for transcript analysis.
         """
-        parts = []
-        
-        # Add previous conversation context if available
-        conversation = _conversations.get(session_id, [])
-        if conversation:
-            # Get last few exchanges (limit to avoid token overflow)
-            recent = conversation[-6:]  # Last 3 exchanges
-            if recent:
-                context_lines = []
-                for msg in recent:
-                    role = msg["role"].upper()
-                    content = msg["content"][:300]  # Truncate long messages
-                    if len(msg["content"]) > 300:
-                        content += "..."
-                    context_lines.append(f"{role}: {content}")
-                
-                parts.append(f"Previous conversation:\n" + "\n".join(context_lines))
+        parts = [message]
         
         # Add file context if files were uploaded
         if file_paths:
             file_list = "\n".join(f"- {path}" for path in file_paths)
-            parts.append(f"""The user has uploaded the following file(s) for analysis:
+            parts.append(f"""
+
+The user has uploaded the following file(s) for analysis:
 {file_list}
 
 Use the analyze_clinical_transcript tool with the file path to analyze these files for HIPAA compliance.""")
         
-        # Add project context
-        parts.append(f"Project ID: {project_id}")
+        return "".join(parts)
+    
+    def _parse_langgraph_result(self, result: dict) -> tuple[str, list]:
+        """
+        Parse LangGraph state into output and steps.
         
-        # Add current user request
-        parts.append(f"Current request: {message}")
+        Args:
+            result: LangGraph state dict with 'messages' and 'iterations'
+            
+        Returns:
+            Tuple of (output_string, steps_list)
+        """
+        messages = result.get("messages", [])
+        iterations = result.get("iterations", 0)
         
-        return "\n\n".join(parts)
+        # Find the last AI message (the final answer)
+        output = ""
+        for msg in reversed(messages):
+            if isinstance(msg, AIMessage) and msg.content:
+                output = msg.content
+                break
+        
+        # Build steps from message sequence
+        steps = []
+        step_number = 0
+        
+        for i, msg in enumerate(messages):
+            if isinstance(msg, AIMessage):
+                step_number += 1
+                
+                # Check for tool calls
+                tool_name = None
+                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                    tool_name = msg.tool_calls[0].get("name") if msg.tool_calls else None
+                
+                # Look ahead for observation (ToolMessage)
+                observation = None
+                if i + 1 < len(messages) and isinstance(messages[i + 1], ToolMessage):
+                    observation = messages[i + 1].content
+                
+                steps.append({
+                    "step_number": step_number,
+                    "thought": msg.content if not msg.tool_calls else None,
+                    "action": tool_name,
+                    "observation": observation,
+                })
+        
+        return output, steps
     
     async def get_session(self, session_id: str) -> dict:
         """Get session details."""

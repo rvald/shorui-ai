@@ -2,7 +2,7 @@
 from .models import Model, ChatMessage, MockModel
 from .tools import Tool, tool
 from .memory import AgentMemory, ActionStep, ToolCall
-from .prompts import DEFAULT_SYSTEM_PROMPT
+from .prompts import SYSTEM_PROMPT
 
 __all__ = [
     "Model",
@@ -13,5 +13,5 @@ __all__ = [
     "AgentMemory",
     "ActionStep", 
     "ToolCall",
-    "DEFAULT_SYSTEM_PROMPT",
+    "SYSTEM_PROMPT",
 ]
