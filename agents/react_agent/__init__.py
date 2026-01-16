@@ -1,7 +1,7 @@
-# Standalone ReAct Agent Package
 """
-A standalone ReAct (Reasoning + Acting) agent implementation.
-Refactored to use LangGraph for workflow orchestration.
+Standalone ReAct Agent Package
+
+A ReAct (Reasoning + Acting) agent using LangGraph for workflow orchestration.
 """
 
 from .agent import ReActAgent
@@ -10,19 +10,8 @@ from .workflow import AgentWorkflow
 from .core.prompts import SYSTEM_PROMPT
 from .core.model_factory import ModelFactory, ModelType
 
-# Tools
-from .tools import (
-    RAGSearchTool,
-    RegulationsRetrieval,
-    get_regulations_retrieval,
-    search_regulations,
-    UploadDocumentTool,
-    CheckIngestionStatusTool,
-    AnalyzeClinicalTranscriptTool,
-    GetComplianceReportTool,
-    QueryAuditLogTool,
-    LookupHIPAARegulationTool,
-)
+# LangChain-compatible tools
+from .tools import search_regulations, analyze_clinical_transcript
 
 __all__ = [
     # Core
@@ -33,14 +22,6 @@ __all__ = [
     "ModelFactory",
     "ModelType",
     # Tools
-    "RAGSearchTool",
-    "RegulationsRetrieval",
-    "get_regulations_retrieval",
     "search_regulations",
-    "UploadDocumentTool",
-    "CheckIngestionStatusTool",
-    "AnalyzeClinicalTranscriptTool",
-    "GetComplianceReportTool",
-    "QueryAuditLogTool",
-    "LookupHIPAARegulationTool",
+    "analyze_clinical_transcript",
 ]
