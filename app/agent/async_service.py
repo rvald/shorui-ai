@@ -2,22 +2,20 @@
 Async Agent Service with LangGraph Integration
 
 Uses LangGraph ReAct workflow for HIPAA compliance queries.
-The workflow handles tool selection and execution automatically.
+Sessions are persisted via Redis checkpointer - no manual conversation tracking needed.
 """
 
 from __future__ import annotations
 
-import asyncio
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from loguru import logger
 
 
 # Lazy-loaded global workflow instance
 _workflow = None
-_conversations: Dict[str, List[dict]] = {}  # session_id -> message history
 
 
 def get_workflow():
@@ -32,7 +30,7 @@ def get_workflow():
         try:
             from agents.react_agent.workflow import AgentWorkflow
             _workflow = AgentWorkflow()
-            logger.info("Created LangGraph AgentWorkflow")
+            logger.info("Created LangGraph AgentWorkflow with Redis checkpointer")
         except Exception as e:
             logger.error(f"Failed to create AgentWorkflow: {e}")
             return None
@@ -41,6 +39,7 @@ def get_workflow():
 
 
 class AsyncAgentService:
+    """Async agent service using LangGraph with Redis checkpointing."""
    
     def __init__(self):
         """Initialize service."""
@@ -53,18 +52,9 @@ class AsyncAgentService:
             self._workflow = get_workflow()
         return self._workflow
     
-    async def create_session(self, metadata: Optional[dict] = None) -> str:
-        """
-        Create new session.
-        
-        Args:
-            metadata: Optional session metadata
-            
-        Returns:
-            Session ID
-        """
+    async def create_session(self) -> str:
+        """Create new session ID (state persisted via Redis checkpointer)."""
         session_id = str(uuid.uuid4())
-        _conversations[session_id] = []
         logger.info(f"Created agent session: {session_id}")
         return session_id
     
@@ -79,7 +69,7 @@ class AsyncAgentService:
         Process user message with LangGraph ReAct workflow.
         
         Args:
-            session_id: Session ID
+            session_id: Session ID (used as thread_id for checkpointing)
             message: User's message
             project_id: Project/tenant ID
             file_paths: Optional file paths for context
@@ -89,12 +79,8 @@ class AsyncAgentService:
         """
         logger.info(f"Processing message in session {session_id}: {message[:50]}...")
         
-        # Ensure session exists
-        if session_id not in _conversations:
-            _conversations[session_id] = []
-        
         # Build user input with file context
-        user_input = self._build_user_input(message, project_id, file_paths)
+        user_input = self._build_user_input(message, file_paths)
         
         # Get workflow
         workflow = self.workflow
@@ -105,19 +91,14 @@ class AsyncAgentService:
             }
         
         try:
-            # Run LangGraph workflow
-            result = await asyncio.to_thread(
-                workflow._invoke_impl,
+            # Run LangGraph workflow with session_id as thread_id for checkpointing
+            result = await workflow.invoke_async(
                 user_input=user_input,
-                config=None,
+                thread_id=session_id,
             )
             
             # Extract output from LangGraph state
             output, steps = self._parse_langgraph_result(result)
-            
-            # Store in conversation history
-            _conversations[session_id].append({"role": "user", "content": message})
-            _conversations[session_id].append({"role": "assistant", "content": output})
             
             logger.info(f"Workflow completed with {len(steps)} steps")
             
@@ -136,7 +117,6 @@ class AsyncAgentService:
     def _build_user_input(
         self,
         message: str,
-        project_id: str,
         file_paths: Optional[List[str]] = None,
     ) -> str:
         """
@@ -150,11 +130,11 @@ class AsyncAgentService:
         if file_paths:
             file_list = "\n".join(f"- {path}" for path in file_paths)
             parts.append(f"""
-
-The user has uploaded the following file(s) for analysis:
-{file_list}
-
-Use the analyze_clinical_transcript tool with the file path to analyze these files for HIPAA compliance.""")
+                        The user has uploaded the following file(s) for analysis:
+                        {file_list}
+                        
+                        Use the analyze_clinical_transcript tool with the file path to analyze these files for HIPAA compliance.
+                        """)
         
         return "".join(parts)
     
@@ -169,7 +149,6 @@ Use the analyze_clinical_transcript tool with the file path to analyze these fil
             Tuple of (output_string, steps_list)
         """
         messages = result.get("messages", [])
-        iterations = result.get("iterations", 0)
         
         # Find the last AI message (the final answer)
         output = ""
@@ -204,19 +183,3 @@ Use the analyze_clinical_transcript tool with the file path to analyze these fil
                 })
         
         return output, steps
-    
-    async def get_session(self, session_id: str) -> dict:
-        """Get session details."""
-        if session_id not in _conversations:
-            raise ValueError(f"Session not found: {session_id}")
-        
-        return {
-            "session_id": session_id,
-            "messages": _conversations[session_id],
-        }
-    
-    async def delete_session(self, session_id: str) -> None:
-        """Delete session."""
-        if session_id in _conversations:
-            del _conversations[session_id]
-        logger.info(f"Deleted session: {session_id}")

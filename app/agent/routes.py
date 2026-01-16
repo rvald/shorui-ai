@@ -16,30 +16,17 @@ from app.agent.schemas import (
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
-# Feature flag for async service
-USE_ASYNC_SERVICE = os.getenv("USE_ASYNC_AGENT", "true").lower() == "true"
-
-# Lazy-loaded service instances
-_sync_service = None
-_async_service = None
+# Lazy-loaded service instance
+_service = None
 
 
-def get_sync_service():
-    """Get legacy sync service (backward compatibility)."""
-    global _sync_service
-    if _sync_service is None:
-        from app.agent.service import AgentService
-        _sync_service = AgentService()
-    return _sync_service
-
-
-def get_async_service():
-    """Get new async service with orchestrator."""
-    global _async_service
-    if _async_service is None:
+def get_service():
+    """Get async agent service (lazy initialization)."""
+    global _service
+    if _service is None:
         from app.agent.async_service import AsyncAgentService
-        _async_service = AsyncAgentService()
-    return _async_service
+        _service = AsyncAgentService()
+    return _service
 
 
 # Ensure temp upload directory exists
@@ -51,12 +38,8 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 @router.post("/sessions", response_model=CreateSessionResponse)
 async def create_session():
     """Create a new ephemeral agent session."""
-    if USE_ASYNC_SERVICE:
-        service = get_async_service()
-        session_id = await service.create_session()
-    else:
-        service = get_sync_service()
-        session_id = service.create_session()
+    service = get_service()
+    session_id = await service.create_session()
     
     return CreateSessionResponse(
         session_id=session_id,
@@ -76,11 +59,6 @@ async def send_message(
     
     Optionally upload files (transcripts) for the agent to analyze.
     Files are saved to a temp directory and paths are included in the task context.
-    
-    Uses async orchestrator with routing for optimal execution:
-    - Direct tool calls: 0 LLM tokens
-    - Prompt chains: Minimal tokens
-    - Agent: Full ReAct loop
     """
     try:
         # Save uploaded files and collect paths
@@ -98,23 +76,14 @@ async def send_message(
                     file_path.write_bytes(content)
                     file_paths.append(str(file_path.absolute()))
         
-        # Call service with message and file paths
-        if USE_ASYNC_SERVICE:
-            service = get_async_service()
-            result = await service.send_message(
-                session_id=session_id,
-                message=message,
-                project_id=project_id,
-                file_paths=file_paths,
-            )
-        else:
-            service = get_sync_service()
-            result = service.send_message(
-                session_id=session_id,
-                message=message,
-                project_id=project_id,
-                file_paths=file_paths,
-            )
+        # Call service
+        service = get_service()
+        result = await service.send_message(
+            session_id=session_id,
+            message=message,
+            project_id=project_id,
+            file_paths=file_paths,
+        )
         
         return AgentResponse(
             content=result["content"],
@@ -124,4 +93,5 @@ async def send_message(
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Agent error: {str(e)}")
+
 
