@@ -8,7 +8,7 @@ from typing import Optional
 from langchain_core.messages import SystemMessage, AIMessage
 
 from .state import AgentState
-from .tools import search_regulations
+from .tools import search_regulations, analyze_clinical_transcript
 from .core.model_factory import ModelType, ModelFactory
 from .core.prompts import SYSTEM_PROMPT
 
@@ -42,7 +42,7 @@ class ReActAgent:
 
         logger.info(f"Agent initialized - model_type={model_type}, model_name={model_name}")
 
-        self.tools = [search_regulations]
+        self.tools = [search_regulations, analyze_clinical_transcript]
 
         self.model_with_tools = self.model.bind_tools(self.tools)
 
