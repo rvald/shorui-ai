@@ -10,7 +10,10 @@ from typing import Any
 from loguru import logger
 
 
-class ChunkingService:
+from shorui_core.domain.interfaces import ChunkerProtocol
+
+
+class ChunkingService(ChunkerProtocol):
     """
     Service for splitting text into chunks.
 

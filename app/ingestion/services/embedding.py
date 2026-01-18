@@ -7,10 +7,12 @@ a configured embedding model (e5-large by default).
 
 from loguru import logger
 
+from shorui_core.domain.interfaces import EmbedderProtocol
+from shorui_core.domain.exceptions import EmbeddingError
 from shorui_core.infrastructure.embeddings import EmbeddingModelSingleton
 
 
-class EmbeddingService:
+class EmbeddingService(EmbedderProtocol):
     """
     Service for generating text embeddings.
 
@@ -53,11 +55,15 @@ class EmbeddingService:
 
         logger.debug(f"Generating embeddings for {len(texts)} texts")
 
-        # The singleton model is callable and accepts a list
-        embeddings = self._model(texts)
+        try:
+            # The singleton model is callable and accepts a list
+            embeddings = self._model(texts)
 
-        logger.debug(
-            f"Generated {len(embeddings)} embeddings of dimension {len(embeddings[0]) if embeddings else 0}"
-        )
+            logger.debug(
+                f"Generated {len(embeddings)} embeddings of dimension {len(embeddings[0]) if embeddings else 0}"
+            )
 
-        return embeddings
+            return embeddings
+        except Exception as e:
+            logger.error(f"Failed to generate embeddings: {e}")
+            raise EmbeddingError(f"Failed to generate embeddings: {e}") from e

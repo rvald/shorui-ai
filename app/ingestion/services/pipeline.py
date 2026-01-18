@@ -146,6 +146,7 @@ class Chunker(PipelineStage):
             logger.warning("No text to chunk")
             return ctx
 
+        from shorui_core.domain.interfaces import ChunkerProtocol
         from app.ingestion.services.chunking import ChunkingService
 
         service = ChunkingService(

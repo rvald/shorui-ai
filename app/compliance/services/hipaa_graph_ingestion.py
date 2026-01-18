@@ -25,7 +25,7 @@ from typing import Any
 from loguru import logger
 
 from app.ingestion.services.storage import get_storage_backend
-from app.ingestion.services.storage_protocol import StorageBackend
+from shorui_core.domain.interfaces import StorageBackend
 from shorui_core.config import settings
 from shorui_core.domain.hipaa_schemas import (
     AuditEventType,

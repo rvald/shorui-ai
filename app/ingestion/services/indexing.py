@@ -12,10 +12,12 @@ from loguru import logger
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
 # Import from shorui_core for infrastructure
+from shorui_core.domain.interfaces import IndexerProtocol
+from shorui_core.domain.exceptions import IndexingError
 from shorui_core.infrastructure.qdrant import QdrantDatabaseConnector
 
 
-class IndexingService:
+class IndexingService(IndexerProtocol):
     """
     Service for indexing embeddings in Qdrant.
 
@@ -89,13 +91,17 @@ class IndexingService:
             f"Indexing {total_points} points to collection '{collection}' in batches of {batch_size}"
         )
 
-        for i in range(0, total_points, batch_size):
-            batch = points[i : i + batch_size]
-            client.upsert(collection_name=collection, points=batch)
-            logger.debug(f"Indexed batch {i // batch_size + 1}: {len(batch)} points")
+        try:
+            for i in range(0, total_points, batch_size):
+                batch = points[i : i + batch_size]
+                client.upsert(collection_name=collection, points=batch)
+                logger.debug(f"Indexed batch {i // batch_size + 1}: {len(batch)} points")
 
-        logger.info(f"Successfully indexed {total_points} points")
-        return True
+            logger.info(f"Successfully indexed {total_points} points")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to index documents: {e}")
+            raise IndexingError(f"Failed to index documents: {e}") from e
 
     def collection_exists(self, collection_name: str) -> bool:
         """
