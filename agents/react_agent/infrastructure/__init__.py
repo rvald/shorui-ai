@@ -3,7 +3,7 @@ Infrastructure module for ReAct Agent.
 
 Provides HTTP clients for backend service communication.
 """
-from .http_clients import (
+from .clients import (
     IngestionClient,
     RAGClient,
     HealthClient,

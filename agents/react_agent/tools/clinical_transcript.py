@@ -6,7 +6,7 @@ This tool is used to analyze clinical transcripts and provide a summary of poten
 import time
 from langchain_core.tools import tool
 from typing import Optional
-from ..infrastructure.http_clients import IngestionClient
+from ..infrastructure.clients import ComplianceClient
 from loguru import logger
 
 
@@ -33,8 +33,8 @@ class ClinicalTranscriptAnalysis:
     POLL_INTERVAL_SECONDS = 2
     MAX_POLL_ATTEMPTS = 60  # 2 minutes max wait
     
-    def __init__(self, client: Optional[IngestionClient] = None):
-        self._client = client or IngestionClient()
+    def __init__(self, client: Optional[ComplianceClient] = None):
+        self._client = client or ComplianceClient()
     
     def forward(
         self,
@@ -92,18 +92,6 @@ class ClinicalTranscriptAnalysis:
         return f"Timeout: Job {job_id} still processing after {self.MAX_POLL_ATTEMPTS * self.POLL_INTERVAL_SECONDS} seconds."
 
 
-# Global singleton instance
-_clinical_transcript_analysis: Optional[ClinicalTranscriptAnalysis] = None
-
-
-def get_clinical_transcript_analysis() -> ClinicalTranscriptAnalysis:
-    """Get the global ClinicalTranscriptAnalysis singleton instance."""
-    global _clinical_transcript_analysis
-    if _clinical_transcript_analysis is None:
-        _clinical_transcript_analysis = ClinicalTranscriptAnalysis()
-    return _clinical_transcript_analysis
-
-
 @tool
 def analyze_clinical_transcript(
     file_path: str,
@@ -131,7 +119,7 @@ def analyze_clinical_transcript(
         Compliance report with PHI findings and recommendations
     """
     try: 
-        clinical_analysis = get_clinical_transcript_analysis()
+        clinical_analysis = ClinicalTranscriptAnalysis()
         result = clinical_analysis.forward(file_path, project_id)
         return result
     except Exception as e:

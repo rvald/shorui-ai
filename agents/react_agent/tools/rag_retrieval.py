@@ -6,7 +6,7 @@ grounded in the retrieved document context.
 """
 from langchain_core.tools import tool
 from typing import Optional
-from ..infrastructure.http_clients import RAGClient
+from ..infrastructure.clients import RAGClient
 from loguru import logger
 
 
@@ -89,18 +89,6 @@ class RegulationsRetrieval:
             )
 
 
-# Global singleton instance
-_regulations_retrieval: Optional[RegulationsRetrieval] = None
-
-
-def get_regulations_retrieval() -> RegulationsRetrieval:
-    """Get the global RegulationsRetrieval singleton instance."""
-    global _regulations_retrieval
-    if _regulations_retrieval is None:
-        _regulations_retrieval = RegulationsRetrieval()
-    return _regulations_retrieval
-
-
 @tool
 def search_regulations(query: str) -> str:
     """
@@ -121,7 +109,8 @@ def search_regulations(query: str) -> str:
         AI-generated answer grounded in HIPAA regulation documents
     """
     try: 
-        retriever = get_regulations_retrieval()
+        # Instantiate directly for now - in future we can inject this
+        retriever = RegulationsRetrieval()
         answer = retriever.forward(query)
         
         if not answer:
