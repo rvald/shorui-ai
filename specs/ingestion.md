@@ -10,24 +10,21 @@ The ingestion module handles document upload, processing, and indexing for the s
 
 ## Module Structure
 
-```
-app/ingestion/
-├── schemas.py              # Pydantic request/response models
-├── routes/                 # API endpoints by domain
-│   ├── documents.py        # Document upload & status
-│   ├── transcripts.py      # HIPAA compliance analysis
-│   └── regulations.py      # Regulation collection stats
-└── services/               # Business logic
-    ├── pipeline.py         # Composable processing pipeline
-    ├── chunking.py         # Text splitting
-    ├── embedding.py        # Vector embeddings
-    ├── indexing.py         # Qdrant indexing
-    ├── storage.py          # MinIO storage
-    ├── local_storage.py    # Filesystem storage (dev)
-    ├── storage_protocol.py # Storage interface
-    ├── job_ledger.py       # PostgreSQL job tracking
-    └── document_ingestion_service.py
-```
+-   `app/ingestion/schemas.py`: Pydantic request/response models
+-   `app/ingestion/routes/`: API endpoints by domain
+    -   `documents.py`: Document upload & status
+    -   `transcripts.py`: HIPAA compliance analysis
+    -   `regulations.py`: Regulation collection stats
+-   `app/ingestion/services/`: Business logic
+    -   `pipeline.py`: Composable processing pipeline
+    -   `chunking.py`: Text splitting
+    -   `embedding.py`: Vector embeddings
+    -   `indexing.py`: Qdrant indexing
+    -   `storage.py`: MinIO storage
+    -   `local_storage.py`: Filesystem storage (dev)
+    -   `storage_protocol.py`: Storage interface
+    -   `job_ledger.py`: PostgreSQL job tracking
+    -   `document_ingestion_service.py`
 
 ---
 
@@ -35,32 +32,26 @@ app/ingestion/
 
 ### Document Processing
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Health check |
-| `POST` | `/documents` | Upload document for async processing |
-| `GET` | `/documents/{job_id}/status` | Get processing job status |
+-   **`GET /health`**: Health check
+-   **`POST /documents`**: Upload document for async processing
+-   **`GET /documents/{job_id}/status`**: Get processing job status
 
-> Source: [documents.py](../app/ingestion/routes/documents.py)
+-   **Source**: [documents.py](../app/ingestion/routes/documents.py)
 
 ### HIPAA Compliance
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/clinical-transcripts` | Upload transcript for PHI detection |
-| `GET` | `/clinical-transcripts/jobs/{job_id}` | Poll analysis job status |
-| `GET` | `/clinical-transcripts/{id}/compliance-report` | Get compliance report |
-| `GET` | `/audit-log` | Query audit events |
+-   **`POST /clinical-transcripts`**: Upload transcript for PHI detection
+-   **`GET /clinical-transcripts/jobs/{job_id}`**: Poll analysis job status
+-   **`GET /clinical-transcripts/{id}/compliance-report`**: Get compliance report
+-   **`GET /audit-log`**: Query audit events
 
-> Source: [transcripts.py](../app/ingestion/routes/transcripts.py)
+-   **Source**: [transcripts.py](../app/ingestion/routes/transcripts.py)
 
 ### HIPAA Regulations
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/hipaa-regulations/stats` | Get Qdrant collection stats |
+-   **`GET /hipaa-regulations/stats`**: Get Qdrant collection stats
 
-> Source: [regulations.py](../app/ingestion/routes/regulations.py)
+-   **Source**: [regulations.py](../app/ingestion/routes/regulations.py)
 
 ---
 
@@ -68,14 +59,14 @@ app/ingestion/
 
 All request/response models use Pydantic for validation:
 
-- `JobStatus` - Processing job status response
-- `UploadResponse` - Document upload acknowledgment
-- `TranscriptUploadResponse` - Transcript analysis result
-- `ComplianceReportResponse` - Full HIPAA compliance report
-- `AuditLogEntry` / `AuditLogResponse` - Audit trail
-- `RegulationCollectionStats` - Qdrant collection info
+-   `JobStatus` - Processing job status response
+-   `UploadResponse` - Document upload acknowledgment
+-   `TranscriptUploadResponse` - Transcript analysis result
+-   `ComplianceReportResponse` - Full HIPAA compliance report
+-   `AuditLogEntry` / `AuditLogResponse` - Audit trail
+-   `RegulationCollectionStats` - Qdrant collection info
 
-> Source: [schemas.py](../app/ingestion/schemas.py)
+-   **Source**: [schemas.py](../app/ingestion/schemas.py)
 
 ---
 
@@ -89,12 +80,18 @@ Raw Content → TextExtractor → Chunker → Embedder → QdrantIndexer
 
 ### Pipeline Stages
 
-| Stage | Class | Purpose |
-|-------|-------|---------|
-| Text extraction | `TextExtractor` | PDF/TXT to plain text |
-| Chunking | `Chunker` | Split into overlapping chunks |
-| Embedding | `Embedder` | Generate vector embeddings |
-| Indexing | `QdrantIndexer` | Store in vector database |
+-   **Text extraction**
+    -   **Class**: `TextExtractor`
+    -   **Purpose**: PDF/TXT to plain text
+-   **Chunking**
+    -   **Class**: `Chunker`
+    -   **Purpose**: Split into overlapping chunks
+-   **Embedding**
+    -   **Class**: `Embedder`
+    -   **Purpose**: Generate vector embeddings
+-   **Indexing**
+    -   **Class**: `QdrantIndexer`
+    -   **Purpose**: Store in vector database
 
 ### Usage
 
@@ -109,7 +106,7 @@ ctx = pipeline.run(PipelineContext(
 ))
 ```
 
-> Source: [pipeline.py](../app/ingestion/services/pipeline.py)
+-   **Source**: [pipeline.py](../app/ingestion/services/pipeline.py)
 
 ---
 
@@ -117,10 +114,12 @@ ctx = pipeline.run(PipelineContext(
 
 Storage is abstracted via the `StorageBackend` protocol:
 
-| Backend | Class | Use Case |
-|---------|-------|----------|
-| MinIO | `MinIOStorage` | Production |
-| Filesystem | `LocalStorage` | Development/Testing |
+-   **MinIO**
+    -   **Class**: `MinIOStorage`
+    -   **Use Case**: Production
+-   **Filesystem**
+    -   **Class**: `LocalStorage`
+    -   **Use Case**: Development/Testing
 
 ### Factory Function
 
@@ -130,7 +129,10 @@ from app.ingestion.services import get_storage_backend
 storage = get_storage_backend()  # Auto-selects based on config
 ```
 
-> Source: [storage_protocol.py](../app/ingestion/services/storage_protocol.py), [storage.py](../app/ingestion/services/storage.py), [local_storage.py](../app/ingestion/services/local_storage.py)
+-   **Source**:
+    -   [storage_protocol.py](../app/ingestion/services/storage_protocol.py)
+    -   [storage.py](../app/ingestion/services/storage.py)
+    -   [local_storage.py](../app/ingestion/services/local_storage.py)
 
 ---
 
@@ -140,34 +142,34 @@ storage = get_storage_backend()  # Auto-selects based on config
 
 Splits text into overlapping character-based chunks.
 
-- Default chunk size: 1000 characters
-- Default overlap: 100 characters
+-   **Default chunk size**: 1000 characters
+-   **Default overlap**: 100 characters
 
-> Source: [chunking.py](../app/ingestion/services/chunking.py)
+-   **Source**: [chunking.py](../app/ingestion/services/chunking.py)
 
 ### EmbeddingService
 
 Generates vector embeddings using the `e5-large-unsupervised` model.
 
-> Source: [embedding.py](../app/ingestion/services/embedding.py)
+-   **Source**: [embedding.py](../app/ingestion/services/embedding.py)
 
 ### IndexingService
 
 Manages Qdrant vector database operations:
-- Collection creation
-- Batch point upserts
-- Default collection: `hipaa_regulations`
+-   Collection creation
+-   Batch point upserts
+-   Default collection: `hipaa_regulations`
 
-> Source: [indexing.py](../app/ingestion/services/indexing.py)
+-   **Source**: [indexing.py](../app/ingestion/services/indexing.py)
 
 ### JobLedgerService
 
 PostgreSQL-backed job tracking with:
-- Idempotency via SHA-256 content hashing
-- Dead Letter Queue for failed jobs
-- Status: `pending` → `processing` → `completed` / `failed`
+-   Idempotency via SHA-256 content hashing
+-   Dead Letter Queue for failed jobs
+-   Status: `pending` → `processing` → `completed` / `failed`
 
-> Source: [job_ledger.py](../app/ingestion/services/job_ledger.py)
+-   **Source**: [job_ledger.py](../app/ingestion/services/job_ledger.py)
 
 ---
 
@@ -175,12 +177,12 @@ PostgreSQL-backed job tracking with:
 
 Document processing is handled asynchronously via Celery:
 
-1. `POST /documents` receives file → generates `job_id`
-2. Celery task `process_document` runs in background
-3. Status tracked in PostgreSQL via `JobLedgerService`
-4. `GET /documents/{job_id}/status` polls for completion
+1.  `POST /documents` receives file → generates `job_id`
+2.  Celery task `process_document` runs in background
+3.  Status tracked in PostgreSQL via `JobLedgerService`
+4.  `GET /documents/{job_id}/status` polls for completion
 
-> Source: [tasks.py](../app/workers/tasks.py)
+-   **Source**: [tasks.py](../app/workers/tasks.py)
 
 ---
 
@@ -188,12 +190,10 @@ Document processing is handled asynchronously via Celery:
 
 Key settings from `shorui_core.config`:
 
-| Setting | Description |
-|---------|-------------|
-| `QDRANT_DATABASE_HOST` | Qdrant server host |
-| `MINIO_ENDPOINT` | MinIO server endpoint |
-| `MINIO_BUCKET_RAW` | Raw document bucket |
-| `USE_LOCAL_STORAGE` | Use filesystem instead of MinIO |
-| `TEXT_EMBEDDING_MODEL_ID` | Embedding model (e5-large) |
+-   **`QDRANT_DATABASE_HOST`**: Qdrant server host
+-   **`MINIO_ENDPOINT`**: MinIO server endpoint
+-   **`MINIO_BUCKET_RAW`**: Raw document bucket
+-   **`USE_LOCAL_STORAGE`**: Use filesystem instead of MinIO
+-   **`TEXT_EMBEDDING_MODEL_ID`**: Embedding model (e5-large)
 
-> Source: [config.py](../shorui_core/config.py)
+-   **Source**: [config.py](../shorui_core/config.py)

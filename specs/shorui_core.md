@@ -10,19 +10,16 @@ This document describes the `shorui_core` module, which serves as the shared fou
 
 ## Module Structure
 
-```
-shorui_core/
-├── config.py              # Global Pydantic settings
-├── domain/                # Pure domain abstractions
-│   ├── interfaces.py      # Service Protocols (Storage, Chunker, etc.)
-│   ├── exceptions.py      # Standard exception hierarchy
-│   └── hipaa_schemas.py   # Shared Pydantic models (PHI, Audit)
-└── infrastructure/        # concrete infrastructure connectors
-    ├── qdrant.py          # Qdrant singleton
-    ├── neo4j.py           # Neo4j singleton
-    ├── embeddings.py      # Embedding model singleton
-    └── minio.py           # MinIO client factory
-```
+-   `shorui_core/config.py`: Global Pydantic settings
+-   `shorui_core/domain/`: Pure domain abstractions
+    -   `interfaces.py`: Service Protocols (Storage, Chunker, etc.)
+    -   `exceptions.py`: Standard exception hierarchy
+    -   `hipaa_schemas.py`: Shared Pydantic models (PHI, Audit)
+-   `shorui_core/infrastructure/`: concrete infrastructure connectors
+    -   `qdrant.py`: Qdrant singleton
+    -   `neo4j.py`: Neo4j singleton
+    -   `embeddings.py`: Embedding model singleton
+    -   `minio.py`: MinIO client factory
 
 ---
 
@@ -34,25 +31,27 @@ The domain layer defines the "contract" for the system using Python Protocols an
 
 Defined in `domain/interfaces.py`, these protocols verify that services in `app/` strictly adhere to the expected interface.
 
-| Protocol | Description |
-|----------|-------------|
-| `StorageBackend` | Abstract interface for file persistence (upload/download/delete) |
-| `ChunkerProtocol` | Interface for text splitting implementations |
-| `EmbedderProtocol` | Interface for vector embedding generation |
-| `IndexerProtocol` | Interface for vector database operations |
-| `ExtractorProtocol` | Interface for parsing raw documents/PDFs |
+-   **`StorageBackend`**: Abstract interface for file persistence (upload/download/delete)
+-   **`ChunkerProtocol`**: Interface for text splitting implementations
+-   **`EmbedderProtocol`**: Interface for vector embedding generation
+-   **`IndexerProtocol`**: Interface for vector database operations
+-   **`ExtractorProtocol`**: Interface for parsing raw documents/PDFs
+
+-   **Source**: [interfaces.py](../shorui_core/domain/interfaces.py)
 
 ### Error Handling
 
 Defined in `domain/exceptions.py`, providing a unified failure hierarchy:
 
-- `ShoruiError` (Base)
-    - `IngestionError`
-        - `IndexingError`
-        - `EmbeddingError`
-        - `ChunkingError`
-    - `ComplianceError`
-        - `PHIDetectionError`
+-   `ShoruiError` (Base)
+    -   `IngestionError`
+        -   `IndexingError`
+        -   `EmbeddingError`
+        -   `ChunkingError`
+    -   `ComplianceError`
+        -   `PHIDetectionError`
+
+-   **Source**: [exceptions.py](../shorui_core/domain/exceptions.py)
 
 ---
 
@@ -60,11 +59,18 @@ Defined in `domain/exceptions.py`, providing a unified failure hierarchy:
 
 The infrastructure layer provides **Singleton** connectors to ensure efficient resource usage and connection pooling.
 
-| Component | Class | Description |
-|-----------|-------|-------------|
-| **Qdrant** | `QdrantDatabaseConnector` | Manages connection to Qdrant Vector DB (Cloud/Local) |
-| **Neo4j** | `Neo4jClientConnector` | Manages driver/session pool for Graph DB |
-| **Embeddings** | `EmbeddingModelSingleton` | Loads the transformer model once and shares it |
+-   **Qdrant**
+    -   **Class**: `QdrantDatabaseConnector`
+    -   **Description**: Manages connection to Qdrant Vector DB (Cloud/Local)
+    -   **Source**: [qdrant.py](../shorui_core/infrastructure/qdrant.py)
+-   **Neo4j**
+    -   **Class**: `Neo4jClientConnector`
+    -   **Description**: Manages driver/session pool for Graph DB
+    -   **Source**: [neo4j.py](../shorui_core/infrastructure/neo4j.py)
+-   **Embeddings**
+    -   **Class**: `EmbeddingModelSingleton`
+    -   **Description**: Loads the transformer model once and shares it
+    -   **Source**: [embeddings.py](../shorui_core/infrastructure/embeddings.py)
 
 ### Usage Example
 
@@ -81,9 +87,9 @@ client = QdrantDatabaseConnector.get_instance()
 
 Configuration is handled via `pydantic-settings` in `config.py`. It loads environment variables from `.env` and provides type-safety.
 
-| Section | Key Settings |
-|---------|--------------|
-| **Database** | `QDRANT_DATABASE_HOST`, `NEO4J_URI`, `POSTGRES_DSN` |
-| **Storage** | `MINIO_ENDPOINT`, `MINIO_BUCKET_RAW` |
-| **Model** | `TEXT_EMBEDDING_MODEL_ID` (Default: `e5-large`) |
-| **Async** | `CELERY_BROKER_URL` |
+-   **Database**: `QDRANT_DATABASE_HOST`, `NEO4J_URI`, `POSTGRES_DSN`
+-   **Storage**: `MINIO_ENDPOINT`, `MINIO_BUCKET_RAW`
+-   **Model**: `TEXT_EMBEDDING_MODEL_ID` (Default: `e5-large`)
+-   **Async**: `CELERY_BROKER_URL`
+
+-   **Source**: [config.py](../shorui_core/config.py)
