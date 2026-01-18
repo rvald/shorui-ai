@@ -6,6 +6,8 @@ environment variables used across the ingestion and RAG services.
 Uses defensive programming - raises errors early if required values are missing.
 """
 
+from __future__ import annotations
+
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 

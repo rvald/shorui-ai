@@ -1,0 +1,110 @@
+"""
+Local filesystem storage backend.
+
+This implementation stores files on the local filesystem,
+useful for development and testing without MinIO.
+"""
+
+import uuid
+from pathlib import Path
+
+from loguru import logger
+
+
+class LocalStorage:
+    """
+    File-system based storage for local development.
+
+    Stores files in a configurable base directory, organized
+    by project_id. Provides the same interface as MinIO storage.
+
+    Usage:
+        storage = LocalStorage(base_path="/tmp/shorui-storage")
+        path = storage.upload(content, "doc.pdf", "project-1")
+        content = storage.download(path)
+    """
+
+    def __init__(self, base_path: str = "/tmp/shorui-storage"):
+        """
+        Initialize local storage.
+
+        Args:
+            base_path: Root directory for all stored files.
+        """
+        self.base_path = Path(base_path)
+        self.base_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"LocalStorage initialized at {self.base_path}")
+
+    def upload(
+        self,
+        content: bytes,
+        filename: str,
+        project_id: str,
+        bucket: str | None = None,
+    ) -> str:
+        """
+        Upload content to local filesystem.
+
+        Args:
+            content: The file content as bytes.
+            filename: Original filename.
+            project_id: Project identifier for organization.
+            bucket: Optional bucket name (used as subdirectory).
+
+        Returns:
+            str: The storage path (bucket/project_id/uuid_filename).
+        """
+        bucket = bucket or "raw"
+
+        # Create directory structure
+        target_dir = self.base_path / bucket / project_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate unique filename
+        unique_id = str(uuid.uuid4())[:8]
+        target_file = target_dir / f"{unique_id}_{filename}"
+
+        # Write file
+        target_file.write_bytes(content)
+
+        # Return relative path from base
+        storage_path = f"{bucket}/{project_id}/{unique_id}_{filename}"
+        logger.info(f"Uploaded to {storage_path}")
+
+        return storage_path
+
+    def download(self, storage_path: str) -> bytes:
+        """
+        Download content from local filesystem.
+
+        Args:
+            storage_path: The path returned from upload().
+
+        Returns:
+            bytes: The file content.
+
+        Raises:
+            FileNotFoundError: If the file doesn't exist.
+        """
+        target_file = self.base_path / storage_path
+
+        if not target_file.exists():
+            raise FileNotFoundError(f"File not found: {storage_path}")
+
+        logger.info(f"Downloaded from {storage_path}")
+        return target_file.read_bytes()
+
+    def delete(self, storage_path: str) -> None:
+        """
+        Delete content from local filesystem.
+
+        Args:
+            storage_path: The path to delete.
+        """
+        target_file = self.base_path / storage_path
+
+        if target_file.exists():
+            target_file.unlink()
+            logger.info(f"Deleted {storage_path}")
+        else:
+            logger.warning(f"File not found for deletion: {storage_path}")

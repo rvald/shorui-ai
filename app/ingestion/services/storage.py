@@ -1,7 +1,11 @@
 """
-StorageService: Service layer for document storage in MinIO.
+Storage backends for document persistence.
 
-This service handles storing and retrieving documents from MinIO object storage.
+This module provides:
+- MinIOStorage: Production storage using MinIO object storage
+- get_storage_backend: Factory function to get the appropriate backend
+
+The storage backend is selected based on the USE_LOCAL_STORAGE setting.
 """
 
 import io
@@ -12,24 +16,24 @@ from loguru import logger
 from shorui_core.config import settings
 from shorui_core.infrastructure.minio import get_minio_client
 
+from .storage_protocol import StorageBackend
 
-class StorageService:
+
+class MinIOStorage:
     """
-    Service for storing and retrieving documents from MinIO.
+    MinIO-based storage for production deployments.
 
-    This service:
-    - Uploads raw documents before processing
-    - Provides download for re-processing
-    - Manages bucket creation
+    Stores documents in MinIO object storage with bucket organization.
+    Implements the StorageBackend protocol.
 
     Usage:
-        service = StorageService()
-        path = service.upload(content, "doc.pdf", "project-1")
-        content = service.download(path)
+        storage = MinIOStorage()
+        path = storage.upload(content, "doc.pdf", "project-1")
+        content = storage.download(path)
     """
 
     def __init__(self):
-        """Initialize the storage service."""
+        """Initialize the MinIO storage service."""
         self._client = get_minio_client()
         self.raw_bucket = settings.MINIO_BUCKET_RAW
         self.processed_bucket = settings.MINIO_BUCKET_PROCESSED
@@ -48,11 +52,11 @@ class StorageService:
             logger.warning(f"Could not ensure bucket '{bucket_name}' exists: {e}")
 
     def upload(
-        self, 
-        content: bytes, 
-        filename: str, 
-        project_id: str, 
-        bucket: str | None = None
+        self,
+        content: bytes,
+        filename: str,
+        project_id: str,
+        bucket: str | None = None,
     ) -> str:
         """
         Upload a document to MinIO.
@@ -137,3 +141,29 @@ class StorageService:
 
         logger.info(f"Deleting {storage_path}")
         self._client.remove_object(bucket_name, object_name)
+
+
+# Backward compatibility alias
+StorageService = MinIOStorage
+
+
+def get_storage_backend() -> StorageBackend:
+    """
+    Factory function to get the appropriate storage backend.
+
+    Uses LOCAL_STORAGE setting to determine which backend to use.
+    Defaults to MinIO for production.
+
+    Returns:
+        StorageBackend: The configured storage backend instance.
+    """
+    use_local = getattr(settings, "USE_LOCAL_STORAGE", False)
+
+    if use_local:
+        from .local_storage import LocalStorage
+
+        logger.info("Using LocalStorage backend")
+        return LocalStorage()
+    else:
+        logger.info("Using MinIOStorage backend")
+        return MinIOStorage()

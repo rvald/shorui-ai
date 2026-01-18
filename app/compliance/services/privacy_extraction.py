@@ -17,7 +17,7 @@ from typing import Any
 from loguru import logger
 from openai import OpenAI
 
-from app.ingestion.services.context_optimizer import (
+from app.compliance.services.context_optimizer import (
     build_compact_prompt,
     build_optimized_batches,
 )

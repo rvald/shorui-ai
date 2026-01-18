@@ -60,13 +60,14 @@ class TestDocumentStatus:
 
     def test_get_status_returns_job_info(self, test_client, mock_job_storage):
         """Getting status should return job information."""
-        mock_job_storage.get.return_value = {
+        mock_job_storage.get_job.return_value = {
             "job_id": "test-job-123",
             "status": "processing",
             "progress": 50,
         }
 
-        with patch("app.ingestion.routes.job_storage", mock_job_storage):
+        # Mock the JobLedgerService constructor to return our mock
+        with patch("app.ingestion.services.job_ledger.JobLedgerService", return_value=mock_job_storage):
             response = test_client.get("/ingest/documents/test-job-123/status")
 
         assert response.status_code == 200
@@ -76,9 +77,9 @@ class TestDocumentStatus:
 
     def test_get_status_returns_404_for_unknown_job(self, test_client, mock_job_storage):
         """Getting status for unknown job should return 404."""
-        mock_job_storage.get.return_value = None
+        mock_job_storage.get_job.return_value = None
 
-        with patch("app.ingestion.routes.job_storage", mock_job_storage):
+        with patch("app.ingestion.services.job_ledger.JobLedgerService", return_value=mock_job_storage):
             response = test_client.get("/ingest/documents/unknown-job/status")
 
         assert response.status_code == 404
@@ -131,7 +132,7 @@ def mock_services():
 
     Since routes now use Celery, we mock the task's delay method.
     """
-    with patch("app.ingestion.routes.process_document") as mock_task:
+    with patch("app.ingestion.routes.documents.process_document") as mock_task:
         # Make task.delay() return a mock AsyncResult
         mock_task.delay.return_value = MagicMock(id="mock-task-id")
 

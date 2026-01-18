@@ -61,7 +61,7 @@ class DocumentIngestionService:
         filename: str,
         content_type: str,
         project_id: str,
-        collection_name: str = "general_documents",
+        collection_name: str | None = None,
     ) -> dict[str, Any]:
         """
         Ingest a document into the vector database.
@@ -71,7 +71,7 @@ class DocumentIngestionService:
             filename: Original filename
             content_type: MIME type of the document
             project_id: Project identifier for multi-tenancy
-            collection_name: Optional custom collection name
+            collection_name: Optional custom collection name (defaults to project_{project_id})
 
         Returns:
             dict: Ingestion statistics including chunks_created, collection_name

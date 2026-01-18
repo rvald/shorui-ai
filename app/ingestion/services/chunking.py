@@ -10,43 +10,12 @@ from typing import Any
 from loguru import logger
 
 
-class SimpleTextSplitter:
-    """Simple character-based text splitter with overlap."""
-
-    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 100):
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
-
-    def split_text(self, text: str) -> list[str]:
-        """Split text into overlapping chunks."""
-        if not text:
-            return []
-
-        chunks = []
-        start = 0
-
-        while start < len(text):
-            end = start + self.chunk_size
-            chunk = text[start:end]
-
-            if chunk.strip():  # Only add non-empty chunks
-                chunks.append(chunk)
-
-            start = end - self.chunk_overlap
-            if start < 0:
-                start = 0
-            if start >= len(text):
-                break
-
-        return chunks
-
-
 class ChunkingService:
     """
     Service for splitting text into chunks.
 
     This service:
-    - Splits text into character-based chunks
+    - Splits text into character-based chunks with overlap
     - Supports configurable chunk size and overlap
     - Provides metadata-enriched chunking
 
@@ -65,11 +34,10 @@ class ChunkingService:
         """
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self._splitter = SimpleTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
 
     def chunk(self, text: str) -> list[str]:
         """
-        Split text into chunks.
+        Split text into overlapping chunks.
 
         Args:
             text: The text to chunk.
@@ -82,7 +50,21 @@ class ChunkingService:
 
         logger.debug(f"Chunking text of length {len(text)}")
 
-        chunks = self._splitter.split_text(text)
+        chunks = []
+        start = 0
+
+        while start < len(text):
+            end = start + self.chunk_size
+            chunk = text[start:end]
+
+            if chunk.strip():  # Only add non-empty chunks
+                chunks.append(chunk)
+
+            start = end - self.chunk_overlap
+            if start < 0:
+                start = 0
+            if start >= len(text):
+                break
 
         logger.debug(f"Created {len(chunks)} chunks")
 
