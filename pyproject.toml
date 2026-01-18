@@ -147,3 +147,8 @@ ignore = [
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.150.2",
+]

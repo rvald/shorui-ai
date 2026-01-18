@@ -1,0 +1,168 @@
+from typing import Protocol, Any, Dict
+
+from app.ingestion.services.document_ingestion_service import DocumentIngestionService
+from app.ingestion.services.storage import StorageService
+from loguru import logger
+
+class DocumentProcessor(Protocol):
+    """Protocol for document processing strategies."""
+    def process(self, content: bytes, filename: str, **kwargs) -> Dict[str, Any]:
+        """
+        Process a document.
+        
+        Args:
+            content: Raw document bytes.
+            filename: Name of the file.
+            **kwargs: Additional metadata/options specific to the processor.
+            
+        Returns:
+            Dict containing processing statistics.
+        """
+        ...
+
+class GeneralDocumentProcessor:
+    """Processor for general documents (PDFs, TXT, etc.)."""
+    def process(self, content: bytes, filename: str, **kwargs) -> Dict[str, Any]:
+        project_id = kwargs.get("project_id")
+        content_type = kwargs.get("content_type", "application/octet-stream")
+        index_to_vector = kwargs.get("index_to_vector", True)
+
+        if not index_to_vector:
+            logger.info(f"Skipping vector indexing for {filename}")
+            return {
+                "document_type": "general",
+                "chunks_created": 0,
+                "indexed_to_vector": False,
+            }
+
+        service = DocumentIngestionService()
+        stats = service.ingest_document(
+            content=content,
+            filename=filename,
+            content_type=content_type,
+            project_id=project_id,
+        )
+        
+        return {
+            "document_type": "general",
+            "chunks_created": stats.get("chunks_created", 0),
+            "collection_name": stats.get("collection_name"),
+            "indexed_to_vector": True,
+        }
+
+
+class HipaaRegulationProcessor:
+    """Processor for HIPAA regulation documents."""
+    def process(self, content: bytes, filename: str, **kwargs) -> Dict[str, Any]:
+        from app.compliance.services.hipaa_regulation_service import HIPAARegulationService
+        
+        text = _extract_text_content(content)
+
+
+        source = kwargs.get("source")
+        title = kwargs.get("title")
+        category = kwargs.get("category")
+
+        service = HIPAARegulationService()
+        stats = service.ingest_regulation(
+            text=text,
+            source=source or filename,
+            title=title,
+            category=category or "privacy_rule",
+        )
+
+        return {
+            "document_type": "hipaa_regulation",
+            "chunks_created": stats.get("chunks_created", 0),
+            "sections_found": stats.get("sections_found", []),
+        }
+
+def _extract_text_content(file_content: bytes) -> str:
+    """
+    Extract text from file content (handles UTF-8 and PDF).
+    """
+    import os
+    import tempfile
+    
+    try:
+        return file_content.decode("utf-8")
+    except UnicodeDecodeError:
+        # Try to extract from PDF
+        import fitz
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+            tmp.write(file_content)
+            tmp_path = tmp.name
+
+        try:
+            with fitz.open(tmp_path) as doc:
+                text = "".join(page.get_text() for page in doc)
+            return text
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+
+
+class IngestionOrchestrator:
+    """
+    Orchestrates the ingestion process:
+    1. Uploads to Storage (MinIO).
+    2. Routes to correct Processor.
+    """
+    
+    def __init__(self):
+        self.storage_service = StorageService()
+        self.processors: Dict[str, DocumentProcessor] = {
+            "general": GeneralDocumentProcessor(),
+            "hipaa_regulation": HipaaRegulationProcessor(),
+        }
+
+    def process(
+        self,
+        job_id: str,
+        file_content: bytes,
+        filename: str,
+        project_id: str,
+        document_type: str = "general",
+        **kwargs
+    ) -> Dict[str, Any]:
+        """
+        Execute the ingestion flow.
+        """
+        logger.info(f"[{job_id}] Orchestrating ingestion for {filename} (type={document_type})")
+
+        # 1. Upload to Storage
+        storage_path = None
+        try:
+            # Note: storage_service.upload expects bytes
+            storage_path = self.storage_service.upload(file_content, filename, project_id)
+            logger.info(f"[{job_id}] Uploaded to MinIO: {storage_path}")
+        except Exception as e:
+            # We log but continue, as processing might still be possible (or we want to fail later)
+            logger.warning(f"[{job_id}] MinIO upload failed: {e}")
+
+        # 2. Select Processor
+        processor = self.processors.get(document_type)
+        if not processor:
+            raise ValueError(f"Unsupported document_type: {document_type}")
+
+        # 3. Process
+        # We pass storage_path in kwargs in case processors need it (future proofing)
+        stats = processor.process(
+            content=file_content, 
+            filename=filename, 
+            project_id=project_id,
+            storage_path=storage_path,
+            **kwargs
+        )
+        
+        result = {
+            "status": "completed",
+            "storage_path": storage_path,
+            **stats
+        }
+        
+        return result
+
+def get_ingestion_orchestrator() -> IngestionOrchestrator:
+    return IngestionOrchestrator()
