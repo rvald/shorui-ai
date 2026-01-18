@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.ingestion.routes import router as ingestion_router
 from app.rag.routes import router as rag_router
 from app.agent.routes import router as agent_router
+from app.compliance.routes import router as compliance_router
 from shorui_core.config import settings
 
 # Create the unified FastAPI app
@@ -45,6 +46,9 @@ app.include_router(rag_router, prefix="/rag", tags=["RAG"])
 
 # Mount the agent router (no prefix, routes already have /agent)
 app.include_router(agent_router, tags=["Agent"])
+
+# Mount the compliance router under /compliance prefix
+app.include_router(compliance_router, prefix="/compliance", tags=["Compliance"])
 
 
 @app.get("/health")

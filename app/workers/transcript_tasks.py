@@ -101,13 +101,16 @@ async def _analyze_transcript_async(
     """Async implementation of transcript analysis."""
     import uuid
 
-    from app.compliance.services.hipaa_graph_ingestion import HIPAAGraphIngestionService
-    from app.compliance.services.privacy_extraction import PrivacyAwareExtractionService
+    from app.compliance.factory import (
+        get_compliance_reporter,
+        get_graph_ingestor,
+        get_privacy_extraction_service,
+    )
 
     try:
         # 1. PHI detection and compliance analysis
         logger.info(f"[{job_id}] Starting PHI detection and LLM analysis")
-        extraction_service = PrivacyAwareExtractionService()
+        extraction_service = get_privacy_extraction_service()
         result = await extraction_service.extract(text, skip_llm=False)
 
         logger.info(f"[{job_id}] Detected {len(result.phi_spans)} PHI spans")
@@ -115,16 +118,16 @@ async def _analyze_transcript_async(
         # 2. Generate Compliance Report
         report_data = None
         try:
-            from app.compliance.services.compliance_report_service import ComplianceReportService
-
-            report_service = ComplianceReportService()
+            report_service = get_compliance_reporter()
             report = report_service.generate_report(
                 transcript_id=result.transcript_id, extraction_result=result
             )
 
             report_data = {
                 "report_id": report.id,
-                "transcript_id": report.transcript_ids[0] if report.transcript_ids else "unknown",
+                "transcript_id": report.transcript_ids[0]
+                if report.transcript_ids
+                else "unknown",
                 "overall_risk_level": report.overall_risk_level,
                 "total_phi_detected": report.total_phi_detected,
                 "total_violations": report.total_violations,
@@ -139,14 +142,16 @@ async def _analyze_transcript_async(
                 ],
                 "generated_at": report.generated_at.isoformat(),
             }
-            logger.info(f"[{job_id}] Generated compliance report: {report.overall_risk_level}")
+            logger.info(
+                f"[{job_id}] Generated compliance report: {report.overall_risk_level}"
+            )
         except Exception as e:
             logger.warning(f"[{job_id}] Failed to generate compliance report: {e}")
 
         # 3. Graph ingestion (pointer-based storage)
         transcript_id = result.transcript_id or str(uuid.uuid4())
         try:
-            graph_service = HIPAAGraphIngestionService()
+            graph_service = get_graph_ingestor()
             await graph_service.ingest_transcript(
                 text=text,
                 extraction_result=result,

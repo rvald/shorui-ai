@@ -6,7 +6,7 @@ using a pointer-based storage pattern to ensure PHI is never stored directly
 in Neo4j.
 
 Pattern:
-    1. PHI text -> Encrypted in MinIO
+    1. PHI text -> Encrypted in MinIO (via StorageProtocol)
     2. PHI pointer -> Stored in Neo4j
     3. Audit trail -> Logged to PostgreSQL
 
@@ -18,20 +18,16 @@ Graph Structure:
 
 import hashlib
 import json
-import os
-
-# Add rag_pipeline_service to path for AuditService
-import sys
 import uuid
 from datetime import datetime
 from typing import Any
 
 from loguru import logger
-from minio import Minio
 
+from app.ingestion.services.storage import get_storage_backend
+from app.ingestion.services.storage_protocol import StorageBackend
 from shorui_core.config import settings
 from shorui_core.domain.hipaa_schemas import (
-    AuditEvent,
     AuditEventType,
     PHIExtractionResult,
 )
@@ -49,8 +45,8 @@ class HIPAAGraphIngestionService:
     Service for ingesting HIPAA compliance data into Neo4j graph.
 
     CRITICAL: This service implements pointer-based storage.
-    - PHI text is encrypted and stored in MinIO
-    - Only pointers (MinIO paths) are stored in Neo4j
+    - PHI text is encrypted and stored in secure storage (MinIO)
+    - Only pointers are stored in Neo4j
     - No raw PHI text is ever written to Neo4j
 
     Usage:
@@ -67,40 +63,24 @@ class HIPAAGraphIngestionService:
         self,
         database: str | None = None,
         phi_bucket: str = "phi-secure",
+        storage_backend: StorageBackend | None = None,
     ):
         """
         Initialize the HIPAA graph ingestion service.
 
         Args:
             database: Neo4j database name (defaults to settings)
-            phi_bucket: MinIO bucket for encrypted PHI storage
+            phi_bucket: Storage bucket/container for encrypted PHI storage
+            storage_backend: Optional storage backend (defaults to system config)
         """
         self._database = database or settings.NEO4J_DATABASE
         self._phi_bucket = phi_bucket
 
-        # MinIO client for secure PHI storage
-        self._minio_client: Minio | None = None
-
-        # MinIO client for secure PHI storage
-        self._minio_client: Minio | None = None
+        # Use injected storage backend or default factory
+        self.storage = storage_backend or get_storage_backend()
 
         # Audit service
         self._audit_service = AuditService() if AuditService else None
-
-    def _get_minio_client(self) -> Minio:
-        """Get or create MinIO client."""
-        if self._minio_client is None:
-            self._minio_client = Minio(
-                settings.MINIO_ENDPOINT,
-                access_key=settings.MINIO_ACCESS_KEY,
-                secret_key=settings.MINIO_SECRET_KEY,
-                secure=settings.MINIO_SECURE,
-            )
-            # Ensure bucket exists
-            if not self._minio_client.bucket_exists(self._phi_bucket):
-                self._minio_client.make_bucket(self._phi_bucket)
-                logger.info(f"Created MinIO bucket: {self._phi_bucket}")
-        return self._minio_client
 
     async def ingest_transcript(
         self,
@@ -133,11 +113,11 @@ class HIPAAGraphIngestionService:
             f"Ingesting transcript '{filename}' with {len(extraction_result.phi_spans)} PHI spans"
         )
 
-        # 1. Store full text encrypted in MinIO
+        # 1. Store full text encrypted in storage
         transcript_id = str(uuid.uuid4())
         transcript_pointer = await self._store_encrypted_text(
             text=text,
-            object_id=f"transcripts/{transcript_id}.enc",
+            filename=f"transcripts/{transcript_id}.enc",
             project_id=project_id,
         )
 
@@ -161,11 +141,11 @@ class HIPAAGraphIngestionService:
             for span in extraction_result.phi_spans:
                 phi_span_id = span.id
 
-                # Extract and store the PHI text separately in MinIO
+                # Extract and store the PHI text separately
                 phi_text = text[span.start_char : span.end_char]
                 phi_pointer = await self._store_encrypted_text(
                     text=phi_text,
-                    object_id=f"phi/{phi_span_id}.enc",
+                    filename=f"phi/{phi_span_id}.enc",
                     project_id=project_id,
                 )
 
@@ -216,20 +196,18 @@ class HIPAAGraphIngestionService:
     async def _store_encrypted_text(
         self,
         text: str,
-        object_id: str,
+        filename: str,
         project_id: str,
     ) -> str:
         """
-        Store text encrypted in MinIO.
+        Store text encrypted in secure storage.
 
         Note: In production, this should use proper encryption (e.g., AWS KMS).
         For now, we store as JSON, but the architecture supports encryption.
 
         Returns:
-            MinIO path pointer (e.g., "minio://phi-secure/phi/abc123.enc")
+            Storage pointer string for retrieval
         """
-        minio = self._get_minio_client()
-
         # Prepare data (in production, encrypt this)
         data = {
             "text": text,
@@ -238,18 +216,24 @@ class HIPAAGraphIngestionService:
         }
         data_bytes = json.dumps(data).encode("utf-8")
 
-        # Upload to MinIO
-        from io import BytesIO
-
-        minio.put_object(
-            self._phi_bucket,
-            object_id,
-            BytesIO(data_bytes),
-            len(data_bytes),
-            content_type="application/json",
-        )
-
-        return f"minio://{self._phi_bucket}/{object_id}"
+        # Upload using storage backend
+        # Note: bucket arg assumes the backend supports it (MinIO does)
+        try:
+            storage_path = self.storage.upload(
+                content=data_bytes,
+                filename=filename,
+                project_id=project_id,
+                bucket=self._phi_bucket,
+            )
+            return storage_path
+        except TypeError:
+            # Fallback if backend doesn't support bucket arg (e.g., LocalStorage)
+            storage_path = self.storage.upload(
+                content=data_bytes,
+                filename=filename,
+                project_id=project_id,
+            )
+            return storage_path
 
     async def retrieve_phi_text(
         self,
@@ -262,42 +246,28 @@ class HIPAAGraphIngestionService:
         after proper authorization checks.
 
         Args:
-            storage_pointer: MinIO path (e.g., "minio://phi-secure/phi/abc.enc")
+            storage_pointer: Path returned from storage backend
 
         Returns:
             Decrypted PHI text, or None if not found
         """
-        if not storage_pointer.startswith("minio://"):
-            logger.warning(f"Invalid storage pointer format: {storage_pointer}")
-            return None
-
-        # Parse pointer: minio://bucket/path
-        pointer_parts = storage_pointer.replace("minio://", "").split("/", 1)
-        if len(pointer_parts) != 2:
-            return None
-
-        bucket, object_path = pointer_parts
-
         try:
-            minio = self._get_minio_client()
-            response = minio.get_object(bucket, object_path)
-            data = json.loads(response.read().decode("utf-8"))
+            # Download using storage backend
+            content = self.storage.download(storage_pointer)
+            data = json.loads(content.decode("utf-8"))
 
             # Log access (HIPAA audit requirement)
             await self._log_audit_event(
                 event_type=AuditEventType.PHI_ACCESSED,
                 description="Retrieved PHI from storage",
                 resource_type="PHI",
-                resource_id=object_path,
+                resource_id=storage_pointer,
             )
 
             return data.get("text")
         except Exception as e:
             logger.error(f"Failed to retrieve PHI: {e}")
             return None
-        finally:
-            response.close()
-            response.release_conn()
 
     async def _log_audit_event(
         self,
@@ -323,8 +293,6 @@ class HIPAAGraphIngestionService:
         except Exception as e:
             logger.error(f"Failed to log audit event: {e}")
 
-
-
     # --- Neo4j Transaction Functions ---
 
     @staticmethod
@@ -335,12 +303,12 @@ class HIPAAGraphIngestionService:
         query = """
         MERGE (t:Transcript {id: $transcript_id, project_id: $project_id})
         SET t.filename = $filename,
-            t.file_hash = $file_hash,
-            t.storage_pointer = $storage_pointer,
-            t.phi_count = $phi_count,
-            t.text_length = $text_length,
-            t.ingested_at = datetime(),
-            t.phi_extraction_complete = true
+        t.file_hash = $file_hash,
+        t.storage_pointer = $storage_pointer,
+        t.phi_count = $phi_count,
+        t.text_length = $text_length,
+        t.ingested_at = datetime(),
+        t.phi_extraction_complete = true
         """
         tx.run(
             query,
@@ -371,13 +339,13 @@ class HIPAAGraphIngestionService:
         query = """
         MERGE (p:PHISpan {id: $phi_span_id, project_id: $project_id})
         SET p.category = $category,
-            p.confidence = $confidence,
-            p.detector = $detector,
-            p.start_char = $start_char,
-            p.end_char = $end_char,
-            p.storage_pointer = $storage_pointer,
-            p.value_hash = $value_hash,
-            p.transcript_id = $transcript_id
+        p.confidence = $confidence,
+        p.detector = $detector,
+        p.start_char = $start_char,
+        p.end_char = $end_char,
+        p.storage_pointer = $storage_pointer,
+        p.value_hash = $value_hash,
+        p.transcript_id = $transcript_id
         """
         tx.run(
             query,

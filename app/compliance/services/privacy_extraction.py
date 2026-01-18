@@ -15,15 +15,12 @@ import time
 from typing import Any
 
 from loguru import logger
-from openai import OpenAI
 
+from app.compliance.protocols import AuditLogger, PHIDetector, RegulationRetriever
 from app.compliance.services.context_optimizer import (
     build_compact_prompt,
     build_optimized_batches,
 )
-from app.compliance.services.phi_detector import get_phi_detector
-from app.compliance.services.regulation_retriever import RegulationRetriever
-from shorui_core.config import settings
 from shorui_core.domain.hipaa_schemas import (
     AuditEventType,
     PHIComplianceAnalysis,
@@ -32,16 +29,10 @@ from shorui_core.domain.hipaa_schemas import (
     TranscriptComplianceResult,
 )
 
-# AuditService is optional - will be None if not available
-try:
-    from shorui_core.infrastructure.audit import AuditService
-except ImportError:
-    logger.warning("Could not import AuditService. Audit logging will be disabled.")
-    AuditService = None
-
 
 class ExtractionError(Exception):
     """Raised when extraction fails."""
+
     pass
 
 
@@ -53,16 +44,6 @@ Format:
 {"overall_assessment": "...", "phi_analyses": [{"phi_span_index": 0, "is_violation": false, "severity": "LOW", "reasoning": "...", "regulation_citation": "45 CFR 164.514(b)", "recommended_action": "..."}], "requires_immediate_action": false}
 
 severity: LOW/MEDIUM/HIGH/CRITICAL. Analyze each PHI span."""
-
-COMPLIANCE_USER_TEMPLATE = """Transcript:
-{text}
-
-PHI Detected:
-{phi_spans_description}
-
-{regulations_section}
-
-For each PHI span: is_violation? severity? regulation_citation? recommended_action?"""
 
 
 # --- In-Memory PHI Cache: Deterministic violations skip LLM ---
@@ -113,21 +94,6 @@ DEFAULT_PHI_VIOLATIONS: dict[str, dict] = {
     },
 }
 
-# PHI types that require LLM for context-dependent analysis
-NEEDS_LLM_ANALYSIS = {
-    "NAME",
-    "DATE",
-    "GEOGRAPHIC",
-    "PHONE",
-    "FAX",
-    "EMAIL",
-    "URL",
-    "IP_ADDRESS",
-    "LICENSE_NUMBER",
-    "BIOMETRIC",
-    "PHOTO",
-}
-
 
 class PrivacyAwareExtractionService:
     """
@@ -140,30 +106,28 @@ class PrivacyAwareExtractionService:
     3. Results logged to audit trail
 
     Usage:
-        service = PrivacyAwareExtractionService()
+        # Use factory to create instance
+        service = get_compliance_service()
         result = await service.extract(transcript_text, transcript_id="abc123")
     """
 
-    def __init__(self, phi_confidence_threshold: float = 0.4):
+    def __init__(
+        self,
+        phi_detector: PHIDetector,
+        regulation_retriever: RegulationRetriever,
+        audit_logger: AuditLogger | None = None,
+    ):
         """
         Initialize the privacy-aware extraction service.
 
         Args:
-            phi_confidence_threshold: Minimum confidence for PHI detection (0.0-1.0)
+            phi_detector: Service for detecting PHI
+            regulation_retriever: Service for retrieving HIPAA regulations
+            audit_logger: Service for audit logging (optional)
         """
-        self.phi_detector = get_phi_detector(min_confidence=phi_confidence_threshold)
-
-        # Regulation retriever for RAG-grounded compliance analysis
-        self._regulation_retriever: RegulationRetriever | None = None
-
-        # Audit service for tamper-evident logging
-        self._audit_service = AuditService() if AuditService else None
-
-    def _get_regulation_retriever(self) -> RegulationRetriever:
-        """Get or create the regulation retriever (lazy initialization)."""
-        if self._regulation_retriever is None:
-            self._regulation_retriever = RegulationRetriever()
-        return self._regulation_retriever
+        self.phi_detector = phi_detector
+        self._regulation_retriever = regulation_retriever
+        self._audit_logger = audit_logger
 
     async def extract(
         self,
@@ -246,9 +210,7 @@ class PrivacyAwareExtractionService:
         return await asyncio.gather(*[process_one(t) for t in transcripts])
 
     async def _analyze_compliance(
-        self, 
-        text: str, 
-        phi_spans: list[PHISpan]
+        self, text: str, phi_spans: list[PHISpan]
     ) -> TranscriptComplianceResult:
         """
         Use LLM to analyze compliance of detected PHI.
@@ -288,23 +250,32 @@ class PrivacyAwareExtractionService:
                 llm_spans.append(span)
                 llm_span_indices.append(i)
 
-        logger.info(f"PHI analysis: {len(cached_analyses)} cached, {len(llm_spans)} need LLM")
+        logger.info(
+            f"PHI analysis: {len(cached_analyses)} cached, {len(llm_spans)} need LLM"
+        )
 
         if not llm_spans:
             return TranscriptComplianceResult(
                 overall_assessment="All PHI types have deterministic violations",
                 phi_analyses=cached_analyses,
-                requires_immediate_action=any(a.severity == "CRITICAL" for a in cached_analyses),
+                requires_immediate_action=any(
+                    a.severity == "CRITICAL" for a in cached_analyses
+                ),
             )
 
         # Retrieve relevant HIPAA regulations for RAG-grounded analysis
         regulations_context = ""
         try:
-            retriever = self._get_regulation_retriever()
-            regulations = retriever.retrieve_for_context(llm_spans, top_k=5)
+            regulations = self._regulation_retriever.retrieve_for_context(
+                llm_spans, top_k=5
+            )
             if regulations:
-                regulations_context = retriever.format_for_prompt(regulations, max_chars=2000)
-                logger.info(f"Retrieved {len(regulations)} HIPAA regulations for context")
+                regulations_context = self._regulation_retriever.format_for_prompt(
+                    regulations, max_chars=2000
+                )
+                logger.info(
+                    f"Retrieved {len(regulations)} HIPAA regulations for context"
+                )
         except Exception as e:
             logger.warning(f"Failed to retrieve regulations (continuing without): {e}")
 
@@ -325,11 +296,11 @@ class PrivacyAwareExtractionService:
                 contexts=batch,
                 system_prompt=COMPLIANCE_SYSTEM_PROMPT,
             )
-            
+
             # Append retrieved regulations to prompt for RAG-grounded analysis
             if regulations_context:
                 user_prompt = f"{user_prompt}\n\n{regulations_context}"
-            
+
             logger.debug(
                 f"Batch {batch_idx + 1}/{len(batches)}: {len(batch)} PHI groups, {input_tokens} input tokens"
             )
@@ -393,7 +364,7 @@ class PrivacyAwareExtractionService:
         """
         try:
             from shorui_core.infrastructure.openai_client import get_openai_client
-            
+
             client = get_openai_client()
 
             logger.debug(f"OpenAI request: {len(user_prompt)} chars prompt")
@@ -454,12 +425,12 @@ class PrivacyAwareExtractionService:
         metadata: dict[str, Any] | None = None,
     ):
         """Log an audit event to PostgreSQL."""
-        if not self._audit_service:
-            logger.warning(f"AuditService not available. Skipping log: {description}")
+        if not self._audit_logger:
+            logger.warning(f"AuditLogger not available. Skipping log: {description}")
             return
 
         try:
-            await self._audit_service.log_event(
+            await self._audit_logger.log(
                 event_type=event_type,
                 description=description,
                 resource_type=resource_type,

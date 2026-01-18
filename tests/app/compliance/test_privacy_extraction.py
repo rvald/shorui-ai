@@ -5,7 +5,7 @@ Tests the HIPAA-compliant extraction pipeline that combines
 Presidio PHI detection with OpenAI LLM compliance reasoning.
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
@@ -17,6 +17,7 @@ from shorui_core.domain.hipaa_schemas import (
     AuditEventType,
     PHICategory,
     PHIComplianceAnalysis,
+    PHISpan,
     TranscriptComplianceResult,
 )
 
@@ -24,74 +25,92 @@ from shorui_core.domain.hipaa_schemas import (
 class TestPrivacyAwareExtractionServiceInit:
     """Test service initialization."""
 
-    def test_default_init(self):
-        """Test default initialization."""
-        service = PrivacyAwareExtractionService()
+    def test_init_with_dependencies(self):
+        """Test initialization with explicit dependencies."""
+        mock_detector = Mock()
+        mock_retriever = Mock()
+        mock_audit = Mock()
 
-        assert service.phi_detector is not None
-        assert hasattr(service, "_audit_service")
+        service = PrivacyAwareExtractionService(
+            phi_detector=mock_detector,
+            regulation_retriever=mock_retriever,
+            audit_logger=mock_audit,
+        )
 
-    def test_custom_confidence_threshold(self):
-        """Test with custom PHI confidence threshold."""
-        service = PrivacyAwareExtractionService(phi_confidence_threshold=0.7)
-        # Verifies that service accepts the parameter (detector may use singleton)
-        assert service.phi_detector is not None
+        assert service.phi_detector is mock_detector
+        assert service._regulation_retriever is mock_retriever
+        assert service._audit_logger is mock_audit
 
 
 class TestPHIDetectionFlow:
     """Test PHI detection without LLM (skip_llm=True)."""
 
     @pytest.fixture
-    def service(self):
+    def mock_detector(self):
+        detector = Mock()
+        detector.detect.return_value = []
+        return detector
+
+    @pytest.fixture
+    def mock_retriever(self):
+        return Mock()
+
+    @pytest.fixture
+    def mock_audit(self):
+        return AsyncMock()
+
+    @pytest.fixture
+    def service(self, mock_detector, mock_retriever, mock_audit):
         """Create service for testing."""
-        return PrivacyAwareExtractionService(phi_confidence_threshold=0.3)
+        return PrivacyAwareExtractionService(
+            phi_detector=mock_detector,
+            regulation_retriever=mock_retriever,
+            audit_logger=mock_audit,
+        )
 
     @pytest.mark.asyncio
-    async def test_extract_with_phi(self, service):
+    async def test_extract_with_phi(self, service, mock_detector):
         """Test extracting from text with PHI."""
         text = "Patient John Smith can be reached at john@email.com"
+        
+        # Mock detection result
+        mock_detector.detect.return_value = [
+            PHISpan(
+                id="1", 
+                category=PHICategory.EMAIL, 
+                start_char=37, 
+                end_char=51,
+                detector="presidio",
+                confidence=0.9
+            )
+        ]
 
         result = await service.extract(text, transcript_id="test-001", skip_llm=True)
 
         assert result.transcript_id == "test-001"
-        assert result.processing_time_ms > 0
-        assert len(result.phi_spans) > 0
-
-        # Check we found email
-        categories = {span.category for span in result.phi_spans}
-        assert PHICategory.EMAIL in categories or PHICategory.NAME in categories
+        assert result.processing_time_ms >= 0
+        assert len(result.phi_spans) == 1
+        assert result.phi_spans[0].category == PHICategory.EMAIL
 
     @pytest.mark.asyncio
-    async def test_extract_empty_text(self, service):
+    async def test_extract_empty_text(self, service, mock_detector):
         """Test extracting from empty text."""
         result = await service.extract("", transcript_id="empty", skip_llm=True)
 
         assert result.transcript_id == "empty"
         assert len(result.phi_spans) == 0
+        mock_detector.detect.assert_called_with("", source_transcript_id="empty")
 
     @pytest.mark.asyncio
-    async def test_extract_no_phi(self, service):
-        """Test extracting from text without obvious PHI."""
-        text = "The weather is nice today. Patient reports feeling better."
-
-        result = await service.extract(text, skip_llm=True)
-
-        # May or may not find PHI depending on NLP model
-        assert result.processing_time_ms > 0
-
-    @pytest.mark.asyncio
-    async def test_audit_event_logged(self, service):
+    async def test_audit_event_logged(self, service, mock_audit, mock_detector):
         """Test that PHI detection logs audit event via AuditService."""
         text = "Contact john@test.com"
-
-        # Mock the audit service
-        service._audit_service = AsyncMock()
-
+        
         await service.extract(text, transcript_id="audit-test", skip_llm=True)
 
         # Verify log_event called
-        assert service._audit_service.log_event.called
-        call_args = service._audit_service.log_event.call_args
+        assert mock_audit.log.called
+        call_args = mock_audit.log.call_args
         assert call_args.kwargs["event_type"] == AuditEventType.PHI_DETECTED
         assert call_args.kwargs["resource_id"] == "audit-test"
 
@@ -101,7 +120,11 @@ class TestBatchExtraction:
 
     @pytest.fixture
     def service(self):
-        return PrivacyAwareExtractionService(phi_confidence_threshold=0.3)
+        return PrivacyAwareExtractionService(
+            phi_detector=Mock(),
+            regulation_retriever=Mock(),
+            audit_logger=AsyncMock(),
+        )
 
     @pytest.mark.asyncio
     async def test_extract_batch_empty(self, service):
@@ -117,13 +140,18 @@ class TestBatchExtraction:
             {"id": "t2", "text": "Email: test@example.com"},
             {"id": "t3", "text": "No PHI here"},
         ]
+        
+        service.extract = AsyncMock()
+        service.extract.side_effect = [
+            Mock(transcript_id="t1"),
+            Mock(transcript_id="t2"),
+            Mock(transcript_id="t3"),
+        ]
 
         results = await service.extract_batch(transcripts)
 
         assert len(results) == 3
-        assert results[0].transcript_id == "t1"
-        assert results[1].transcript_id == "t2"
-        assert results[2].transcript_id == "t3"
+        assert service.extract.call_count == 3
 
 
 class TestLLMComplianceAnalysis:
@@ -131,7 +159,11 @@ class TestLLMComplianceAnalysis:
 
     @pytest.fixture
     def service(self):
-        return PrivacyAwareExtractionService()
+        return PrivacyAwareExtractionService(
+            phi_detector=Mock(),
+            regulation_retriever=Mock(),
+            audit_logger=AsyncMock(),
+        )
 
     @pytest.mark.asyncio
     async def test_llm_called_when_phi_found(self, service):
@@ -148,6 +180,18 @@ class TestLLMComplianceAnalysis:
             ],
             requires_immediate_action=False,
         )
+        
+        # Mock detector to find PHI
+        service.phi_detector.detect.return_value = [
+            PHISpan(
+                id="1",
+                category=PHICategory.NAME,
+                start_char=0,
+                end_char=10,
+                detector="presidio",
+                confidence=0.9
+            )
+        ]
 
         with patch.object(
             service, "_analyze_compliance", new_callable=AsyncMock, return_value=mock_response
@@ -156,12 +200,14 @@ class TestLLMComplianceAnalysis:
             result = await service.extract(text, skip_llm=False)
 
             # Should call LLM since skip_llm=False and PHI was detected
-            if len(result.phi_spans) > 0:
-                mock_analyze.assert_called_once()
+            mock_analyze.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_llm_not_called_when_explicitly_disabled(self, service):
         """Test that LLM is not called when skip_llm=True."""
+        # Fix mock to return empty list or valid spans so it doesn't crash on len()
+        service.phi_detector.detect.return_value = []
+        
         with patch.object(service, "_analyze_compliance", new_callable=AsyncMock) as mock_analyze:
             text = "Patient John Smith"
             await service.extract(text, skip_llm=True)  # Explicitly skip LLM
@@ -230,7 +276,3 @@ class TestPHIHash:
 
         hashes = [compute_phi_hash(text) for _ in range(10)]
         assert len(set(hashes)) == 1  # All hashes are the same
-
-
-class TestServiceCleanup:
-    """Test service cleanup."""
