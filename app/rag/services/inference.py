@@ -1,8 +1,6 @@
+from __future__ import annotations
 """
-InferenceService: Service layer for LLM inference.
-
-This service handles generating answers using LLM with retrieved context.
-Supports both OpenAI and RunPod backends.
+Inference services implementing the GenerativeModel protocol.
 """
 
 from typing import Any
@@ -10,7 +8,9 @@ from typing import Any
 import requests
 from loguru import logger
 
+from app.rag.protocols import GenerativeModel
 from shorui_core.config import settings
+from shorui_core.infrastructure.openai_client import get_openai_client
 
 try:
     from openai import OpenAI
@@ -37,55 +37,29 @@ If the context doesn't contain the answer, say "I don't have enough information 
 Be concise and precise in your answers."""
 
 
-class InferenceService:
-    """
-    Service for LLM-based answer generation.
-
-    Supports:
-    - OpenAI API (default)
-    - RunPod (custom endpoint)
-
-    Usage:
-        # OpenAI
-        service = InferenceService()
-
-        # RunPod
-        service = InferenceService(backend="runpod")
-    """
+class OpenAIGenerator(GenerativeModel):
+    """GenerativeModel implementation using OpenAI API."""
 
     def __init__(
         self,
-        backend: str = "openai",
         model: str = None,
         api_key: str | None = None,
         base_url: str | None = None,
         use_hipaa_prompt: bool = True,
     ):
-        """
-        Initialize the inference service.
-
-        Args:
-            backend: "openai" or "runpod"
-            model: Model name (defaults to config)
-            api_key: API key (uses env vars if not provided)
-            base_url: Custom API base URL
-            use_hipaa_prompt: Use HIPAA compliance system prompt (default True)
-        """
-        self.backend = backend
         self.model = model or settings.OPENAI_MODEL_ID
         self._api_key = api_key
         self._base_url = base_url
-        self._client = None
-
         self.system_prompt = (
             HIPAA_SYSTEM_PROMPT if use_hipaa_prompt else GENERAL_SYSTEM_PROMPT
         )
+        self._client = None
 
-    def _get_openai_client(self):
-        """Get the OpenAI client (uses singleton for connection reuse)."""
+    def _get_client(self):
+        """Get the OpenAI client."""
         if self._client is None:
             if OpenAI is None:
-                raise ImportError("openai package is required for InferenceService")
+                raise ImportError("openai package is required")
 
             # Use custom settings if provided, otherwise use singleton
             if self._api_key or self._base_url:
@@ -96,34 +70,14 @@ class InferenceService:
                     kwargs["base_url"] = self._base_url
                 self._client = OpenAI(**kwargs)
             else:
-                from shorui_core.infrastructure.openai_client import get_openai_client
                 self._client = get_openai_client()
         return self._client
 
     async def generate(
         self, query: str, context: str | None = None, max_tokens: int = 2048
     ) -> dict[str, Any]:
-        """
-        Generate an answer using the LLM.
-
-        Args:
-            query: The user's question.
-            context: Retrieved context from documents.
-            max_tokens: Maximum tokens in response.
-
-        Returns:
-            Dict with 'answer' key.
-        """
-        if self.backend == "runpod":
-            return await self._generate_runpod(query, context, max_tokens)
-        else:
-            return await self._generate_openai(query, context, max_tokens)
-
-    async def _generate_openai(
-        self, query: str, context: str | None, max_tokens: int
-    ) -> dict[str, Any]:
-        """Generate using OpenAI API."""
-        client = self._get_openai_client()
+        """Generate answer using OpenAI."""
+        client = self._get_client()
 
         # Build the user prompt
         if context:
@@ -143,6 +97,11 @@ Answer:"""
         logger.info(f"Generating answer (OpenAI) for: '{query[:50]}...'")
 
         # Call the LLM
+        # Note: In a real async/production env, this should potentially run in a threadpool
+        # if the client is synchronous. shorui_core.infrastructure.openai_client
+        # typically provides a sync client, so we might need asyncio.to_thread here
+        # but sticking to original pattern for now (which was sync call in async def).
+        
         response = client.chat.completions.create(
             model=self.model,
             messages=[
@@ -166,15 +125,28 @@ Answer:"""
             else None,
         }
 
-    async def _generate_runpod(
-        self, query: str, context: str | None, max_tokens: int
-    ) -> dict[str, Any]:
-        """Generate using RunPod API."""
-        api_url = self._base_url or settings.RUNPOD_API_URL
-        api_token = self._api_key or settings.RUNPOD_API_TOKEN
-        model = settings.MODEL_INFERENCE
 
-        if not api_url or not api_token:
+class RunPodGenerator(GenerativeModel):
+    """GenerativeModel implementation using RunPod."""
+
+    def __init__(
+        self,
+        api_url: str | None = None,
+        api_token: str | None = None,
+        use_hipaa_prompt: bool = True,
+    ):
+        self.api_url = api_url or settings.RUNPOD_API_URL
+        self.api_token = api_token or settings.RUNPOD_API_TOKEN
+        self.model = settings.MODEL_INFERENCE
+        self.system_prompt = (
+            HIPAA_SYSTEM_PROMPT if use_hipaa_prompt else GENERAL_SYSTEM_PROMPT
+        )
+
+    async def generate(
+        self, query: str, context: str | None = None, max_tokens: int = 2048
+    ) -> dict[str, Any]:
+        """Generate answer using RunPod."""
+        if not self.api_url or not self.api_token:
             raise ValueError("RUNPOD_API_URL and RUNPOD_API_TOKEN required for RunPod backend")
 
         # Build prompt
@@ -194,7 +166,7 @@ Query: {query}"""
         payload = {
             "input": input_text,
             "instructions": self.system_prompt,
-            "model": model,
+            "model": self.model,
             "max_output_tokens": settings.MAX_OUTPUT_TOKENS_INFERENCE,
             "top_p": settings.TOP_P_INFERENCE,
             "temperature": settings.TEMPERATURE_INFERENCE,
@@ -203,8 +175,13 @@ Query: {query}"""
         logger.info(f"Generating answer (RunPod) for: '{query[:50]}...'")
 
         try:
+            # Using synchronous requests here as per original implementation
+            # Ideally should use httpx for async
             response = requests.post(
-                api_url, headers={"Authorization": f"Bearer {api_token}"}, json=payload, timeout=120
+                self.api_url, 
+                headers={"Authorization": f"Bearer {self.api_token}"}, 
+                json=payload, 
+                timeout=120
             )
             response.raise_for_status()
             result = response.json()
@@ -216,7 +193,12 @@ Query: {query}"""
 
             logger.info(f"Generated answer with {len(answer)} characters")
 
-            return {"answer": answer, "model": model, "backend": "runpod", "raw_response": result}
+            return {
+                "answer": answer, 
+                "model": self.model, 
+                "backend": "runpod", 
+                "raw_response": result
+            }
 
         except requests.exceptions.RequestException as e:
             logger.error(f"RunPod request failed: {e}")

@@ -6,12 +6,12 @@ This module provides endpoints for RAG (Retrieval-Augmented Generation):
 - GET /rag/search - Search-only: retrieve without LLM
 """
 
+from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from app.rag.services.inference import InferenceService
-from app.rag.services.retrieval import RetrievalService
+from app.rag.factory import get_generator, get_retriever
 
 router = APIRouter()
 
@@ -86,11 +86,15 @@ async def rag_query(request: QueryRequest):
     logger.info(f"RAG query: '{request.query}' for project '{request.project_id}'")
 
     try:
-        # Retrieve context
-        retrieval_service = RetrievalService()
-        search_results = await retrieval_service.search(
+        # Retrieve context using factory
+        retriever = get_retriever()
+        
+        # Note: We use the full retrieve pipeline here which returns a dict
+        # matching what the route expects (documents list inside a dict)
+        retrieval_result = await retriever.retrieve(
             query=request.query, project_id=request.project_id, k=request.k
         )
+        search_results = retrieval_result["documents"]
 
         if not search_results:
             return QueryResponse(
@@ -102,31 +106,38 @@ async def rag_query(request: QueryRequest):
         # Build context string from search results
         context_parts = []
         for i, result in enumerate(search_results, 1):
-            source = result.get("filename", "unknown")
-            page = result.get("page_num", "?")
-            content = result.get("content", "")
-            context_parts.append(f"[Source {i}: {source}, page {page}]\n{content}")
+            if result.get("is_graph"):
+                 context_parts.append(result.get("content", ""))
+            else:
+                source = result.get("filename", "unknown")
+                page = result.get("page_num", "?")
+                content = result.get("content", "")
+                context_parts.append(f"[Source {i}: {source}, page {page}]\n{content}")
 
         context_text = "\n\n".join(context_parts)
 
-        # Generate answer using specified backend
-        inference_service = InferenceService(backend=request.backend)
-        generation_result = await inference_service.generate(
+        # Generate answer using specified backend via factory
+        generator = get_generator(backend=request.backend)
+        generation_result = await generator.generate(
             query=request.query, context=context_text
         )
 
         # Build sources list
-        sources = [
-            SourceDocument(
-                filename=r.get("filename"),
-                page_num=r.get("page_num"),
-                score=r.get("score", 0),
-                content_preview=r.get("content", "")[:200] + "..."
-                if len(r.get("content", "")) > 200
-                else r.get("content", ""),
+        sources = []
+        for r in search_results[:5]:  # Top 5 sources
+            if r.get("is_graph"):
+                continue
+                
+            sources.append(
+                SourceDocument(
+                    filename=r.get("filename"),
+                    page_num=r.get("page_num"),
+                    score=r.get("score", 0),
+                    content_preview=r.get("content", "")[:200] + "..."
+                    if len(r.get("content", "")) > 200
+                    else r.get("content", ""),
+                )
             )
-            for r in search_results[:5]  # Top 5 sources
-        ]
 
         return QueryResponse(
             answer=generation_result["answer"], sources=sources, query=request.query
@@ -154,8 +165,15 @@ async def rag_search(
     logger.info(f"RAG search: '{query}' in project '{project_id}' (k={k})")
 
     try:
-        retrieval_service = RetrievalService()
-        search_results = await retrieval_service.search(query=query, project_id=project_id, k=k)
+        retriever = get_retriever()
+        
+        # We use the search() method on the retriever for simple vector search
+        # OR we could use retrieve() if we want the full pipeline output.
+        # The original code used retrieval_service.search() which was a wrapper.
+        # PipelineRetriever.search() is also a wrapper.
+        # However, the endpoint expects specific fields.
+        
+        search_results = await retriever.search(query=query, project_id=project_id, k=k)
 
         results = [
             SearchResult(

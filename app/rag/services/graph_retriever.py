@@ -1,58 +1,34 @@
+from __future__ import annotations
 """
-GraphRetrieverService: Neo4j-based graph reasoning for RAG.
-
-This service enhances retrieval by:
-1. Following relationships in Neo4j to expand context
-2. Detecting missing references (gaps) for RFI suggestions
+Graph retriever service implementing the GraphRetriever protocol.
 """
 
 from typing import Any
 
 from loguru import logger
 
+from app.rag.protocols import GraphRetriever
 from shorui_core.infrastructure.neo4j import get_neo4j_client
 
 
-class GraphRetrieverService:
+class GraphRetrieverService(GraphRetriever):
     """
     Graph-based context expansion and gap detection.
-
-    Follows relationships between TextBlocks, Sheets, and Details
-    in Neo4j to find related context and detect missing references.
-
-    Usage:
-        service = GraphRetrieverService()
-        refs, gaps = await service.retrieve_and_reason(hits, project_id="my-project")
     """
 
-    def __init__(self, mock: bool = False, database: str = "neo4j"):
+    def __init__(self, database: str = "neo4j"):
         """
         Initialize the graph retriever.
 
         Args:
-            mock: If True, skip actual Neo4j queries.
             database: Neo4j database name.
         """
-        self._mock = mock
         self._database = database
 
     async def retrieve_and_reason(
         self, hits: list[dict[str, Any]], project_id: str, is_gap_query: bool = False
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        """
-        Reason over search hits using Neo4j graph.
-
-        Args:
-            hits: Search results with metadata (id, content, etc.)
-            project_id: Project identifier for scoping.
-            is_gap_query: If True, fetch ALL gaps for the project.
-
-        Returns:
-            Tuple of (expanded_references, gap_report)
-        """
-        if self._mock:
-            return [], []
-
+        """Reason over search hits using Neo4j graph."""
         if not hits:
             return [], []
 

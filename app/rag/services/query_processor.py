@@ -1,18 +1,15 @@
+from __future__ import annotations
 """
-QueryProcessor: Pre-retrieval processing for RAG queries.
-
-This service handles:
-1. SelfQuery: Extract keywords and detect intent
-2. QueryExpansion: Generate multiple search queries
-
-Uses OpenAI client singleton for connection reuse.
+Query analysis service implementing the QueryAnalyzer protocol.
 """
 
+import asyncio
 import json
 from typing import Any
 
 from loguru import logger
 
+from app.rag.protocols import QueryAnalyzer
 from shorui_core.config import settings
 from shorui_core.infrastructure.openai_client import get_openai_client
 
@@ -42,47 +39,24 @@ Alternative 3
 """
 
 
-class QueryProcessor:
+class LLMQueryAnalyzer(QueryAnalyzer):
     """
-    Pre-retrieval query processing service.
-
-    Combines SelfQuery (keyword/intent extraction) and
-    QueryExpansion (multi-query generation) for better retrieval.
-
-    Uses OpenAI client singleton for efficient connection reuse.
-
-    Usage:
-        processor = QueryProcessor()
-        result = processor.process("What materials for foundation?", expand_to_n=3)
-        # result: {"keywords": [...], "intent": "general", "expanded_queries": [...]}
+    Query analyzer using LLM (OpenAI) for keyword extraction and expansion.
     """
 
-    def __init__(self, mock: bool = False, model: str = None):
+    def __init__(self, model: str = None):
         """
-        Initialize the query processor.
+        Initialize the analyzer.
 
         Args:
-            mock: If True, skip LLM calls and return defaults.
             model: OpenAI model to use (defaults to config).
         """
-        self._mock = mock
         self._model = model or settings.OPENAI_MODEL_ID
 
     def _call_openai(
         self, system_prompt: str, user_message: str, temperature: float = 0, json_mode: bool = False
     ) -> str:
-        """
-        Call OpenAI API using the singleton client.
-
-        Args:
-            system_prompt: System prompt for the LLM.
-            user_message: User message to process.
-            temperature: LLM temperature (0 = deterministic).
-            json_mode: If True, request JSON response format.
-
-        Returns:
-            The LLM response content as a string.
-        """
+        """Call OpenAI API using the singleton client."""
         client = get_openai_client()
 
         kwargs = {
@@ -101,22 +75,7 @@ class QueryProcessor:
         return response.choices[0].message.content
 
     def extract_keywords(self, query: str) -> dict[str, Any]:
-        """
-        Extract keywords and intent from a query (SelfQuery).
-
-        Args:
-            query: The user's search query.
-
-        Returns:
-            Dict with keys: keywords (list), intent (str), is_gap_query (bool)
-        """
-        if self._mock:
-            return {
-                "keywords": query.split()[:5],  # Simple word split
-                "intent": "general",
-                "is_gap_query": False,
-            }
-
+        """Extract keywords and intent from a query."""
         logger.info(f"Extracting keywords from: '{query}'")
 
         try:
@@ -142,19 +101,7 @@ class QueryProcessor:
             return {"keywords": query.split()[:5], "intent": "general", "is_gap_query": False}
 
     def expand_query(self, query: str, n: int = 3) -> list[str]:
-        """
-        Expand a query into multiple search queries (QueryExpansion).
-
-        Args:
-            query: The original query.
-            n: Number of total queries to generate (including original).
-
-        Returns:
-            List of queries (original + alternatives).
-        """
-        if self._mock:
-            return [query] * n
-
+        """Expand a query into multiple search queries."""
         logger.info(f"Expanding query to {n} variations")
 
         try:
@@ -178,16 +125,7 @@ class QueryProcessor:
             return [query]
 
     def process(self, query: str, expand_to_n: int = 3) -> dict[str, Any]:
-        """
-        Full query processing: extract keywords + expand queries.
-
-        Args:
-            query: The user's search query.
-            expand_to_n: Number of query variations to generate.
-
-        Returns:
-            Dict with: keywords, intent, is_gap_query, expanded_queries
-        """
+        """Full query processing (synchronous)."""
         # Extract keywords and intent
         extraction = self.extract_keywords(query)
 
@@ -197,21 +135,8 @@ class QueryProcessor:
         return {**extraction, "expanded_queries": expanded, "original_query": query}
 
     async def process_async(self, query: str, expand_to_n: int = 3) -> dict[str, Any]:
-        """
-        Async query processing: runs keyword extraction and query expansion in PARALLEL.
-
-        Same as process() but uses asyncio to run both LLM calls concurrently,
-        reducing latency by ~50% compared to sequential execution.
-
-        Args:
-            query: The user's search query.
-            expand_to_n: Number of query variations to generate.
-
-        Returns:
-            Dict with: keywords, intent, is_gap_query, expanded_queries
-        """
-        import asyncio
-
+        """Async query processing: runs keyword extraction and query expansion in PARALLEL."""
+        
         # Run both LLM calls in parallel using thread pool
         extraction_task = asyncio.to_thread(self.extract_keywords, query)
         expansion_task = asyncio.to_thread(self.expand_query, query, expand_to_n)
