@@ -180,3 +180,12 @@ class StorageBackend(Protocol):
             storage_path: The path to delete.
         """
         ...
+
+    def ensure_bucket_exists(self, bucket_name: str) -> None:
+        """
+        Ensure a storage bucket/container exists.
+
+        Args:
+            bucket_name: The name of the bucket to check or create.
+        """
+        ...

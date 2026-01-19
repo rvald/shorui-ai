@@ -113,8 +113,14 @@ class PipelineRetriever(Retriever):
             # return values.
             # Wait, `retrieve_and_reason` returns raw data. We need to format it into "content".
             
+            if unique_results:
+                logger.debug(f"Passing {len(unique_results)} hits to graph. First hit keys: {unique_results[0].keys()}")
+                
             refs, gaps = await self._graph_retriever.retrieve_and_reason(
-                unique_results, project_id=project_id, is_gap_query=is_gap_query
+                unique_results, 
+                project_id=project_id, 
+                is_gap_query=is_gap_query,
+                query_analysis=query_info
             )
 
             # We need to format these refs/gaps into "content" strings for the context.
@@ -217,6 +223,7 @@ class PipelineRetriever(Retriever):
                     "block_id": hit.payload.get("block_id"),
                     "bbox": hit.payload.get("bbox"),
                     "sheet_id": hit.payload.get("sheet_id"),
+                    "section_id": hit.payload.get("section_id"),
                 }
             )
 

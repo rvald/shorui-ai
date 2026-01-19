@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 GraphBaseModel: Base class for documents stored in Neo4j graph database.
 

@@ -109,7 +109,7 @@ class ComplianceReporter(Protocol):
 class GraphIngestor(Protocol):
     """Protocol for graph ingestion services."""
 
-    def ingest_transcript(
+    async def ingest_transcript(
         self,
         text: str,
         extraction_result: PHIExtractionResult,

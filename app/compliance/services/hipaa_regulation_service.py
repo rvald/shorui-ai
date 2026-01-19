@@ -18,7 +18,7 @@ from app.ingestion.services.embedding import EmbeddingService
 from app.ingestion.services.indexing import IndexingService
 
 # Common HIPAA section patterns for metadata extraction
-SECTION_PATTERN = re.compile(r"§?\s*(\d{3}\.\d{3}(?:\([a-z]\)(?:\(\d+\))?)?)", re.IGNORECASE)
+SECTION_PATTERN = re.compile(r"(?:§\s*|45\s*CFR\s*|PART\s*)?(\d{3}\.\d{3}(?:\([a-z]\)(?:\(\d+\))?)?)", re.IGNORECASE)
 
 # Known HIPAA section titles for better metadata
 HIPAA_SECTIONS = {
@@ -103,6 +103,12 @@ class HIPAARegulationService:
 
         # Extract section references from text
         sections_found = self._extract_sections(text)
+        
+        # Also check source name for section (important for small docs or specific files)
+        source_sections = self._extract_sections(source)
+        for s in source_sections:
+            if s not in sections_found:
+                sections_found.append(s)
 
         # Chunk the text
         chunks = self._chunking.chunk_with_metadata(text)
@@ -146,6 +152,47 @@ class HIPAARegulationService:
             metadata=metadata_list,
             collection_name=self.COLLECTION_NAME,
         )
+
+        # Index to Neo4j
+        try:
+            from shorui_core.infrastructure.neo4j import get_neo4j_client
+            client = get_neo4j_client()
+            with client.session() as session:
+                # Create a main document node
+                session.run(
+                    """
+                    MERGE (d:RegulationDoc {id: $source})
+                    SET d.title = $title,
+                        d.category = $category,
+                        d.updated_at = datetime()
+                    """,
+                    source=source,
+                    title=title or self._get_section_title(source),
+                    category=category
+                )
+                
+                # Create nodes for each section found
+                logger.info(f"Indexing {len(sections_found)} sections to Neo4j for {source}")
+                for section_id in sections_found:
+                    # Normalize section ID (e.g., "164.514(b)" -> "164.514")
+                    base_id = section_id.split("(")[0]
+                    session.run(
+                        """
+                        MERGE (r:Regulation {id: $id})
+                        SET r.title = $title,
+                            r.category = $category,
+                            r.updated_at = datetime()
+                        WITH r
+                        MATCH (d:RegulationDoc {id: $source})
+                        MERGE (d)-[:HAS_SECTION]->(r)
+                        """,
+                        id=base_id,
+                        title=self._get_section_title(base_id) or f"Section {base_id}",
+                        category=category,
+                        source=source
+                    )
+        except Exception as e:
+            logger.warning(f"Failed to index regulation to Neo4j: {e}")
 
         logger.info(f"Indexed {len(chunks)} regulation chunks to {self.COLLECTION_NAME}")
 

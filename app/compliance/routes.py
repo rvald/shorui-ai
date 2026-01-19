@@ -42,6 +42,7 @@ router = APIRouter(tags=["compliance"])
 )
 async def upload_clinical_transcript(
     file: UploadFile = File(...),
+    project_id: str = Query("default", description="Project ID"),
     background_tasks: BackgroundTasks = None,
     use_async: bool = Query(True, description="Process asynchronously via Celery"),
 ):
@@ -60,7 +61,7 @@ async def upload_clinical_transcript(
         content = await file.read()
         text = content.decode("utf-8")
         filename = file.filename or "unknown.txt"
-        project_id = "default-project"  # In real app, extract from auth token
+        # project_id from query param
         job_id = str(uuid.uuid4())
 
         logger.info(

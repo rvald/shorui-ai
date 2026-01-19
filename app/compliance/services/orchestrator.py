@@ -1,4 +1,5 @@
 import uuid
+import inspect
 from typing import Dict, Any
 from loguru import logger
 
@@ -7,6 +8,7 @@ from app.compliance.factory import (
     get_graph_ingestor,
     get_privacy_extraction_service,
 )
+from app.ingestion.services.pipeline import create_document_pipeline, PipelineContext
 
 class ComplianceOrchestrator:
     """
@@ -28,10 +30,19 @@ class ComplianceOrchestrator:
         """
         logger.info(f"[{job_id}] Orchestrating transcript analysis for {filename}")
 
+        transcript_id = str(uuid.uuid4())
+
         # 1. PHI detection and compliance analysis
         logger.info(f"[{job_id}] Starting PHI detection and LLM analysis")
         extraction_service = get_privacy_extraction_service()
-        result = await extraction_service.extract(text, skip_llm=False)
+        result = await extraction_service.extract(
+            text,
+            transcript_id=transcript_id,
+            filename=filename,
+            project_id=project_id,
+            skip_llm=False,
+        )
+        transcript_id = result.transcript_id or transcript_id
 
         logger.info(f"[{job_id}] Detected {len(result.phi_spans)} PHI spans")
 
@@ -68,19 +79,41 @@ class ComplianceOrchestrator:
         except Exception as e:
             logger.warning(f"[{job_id}] Failed to generate compliance report: {e}")
 
-        # 3. Graph ingestion (pointer-based storage)
-        transcript_id = result.transcript_id or str(uuid.uuid4())
+        # 3. Vector Ingestion (Redacted Text)
         try:
-            graph_service = get_graph_ingestor()
-            await graph_service.ingest_transcript(
-                text=text,
-                extraction_result=result,
-                filename=filename,
-                project_id=project_id,
+            logger.info(f"[{job_id}] Starting vector ingestion for RAG (Redacted)")
+            
+            # Redact PHI
+            maybe_redacted = extraction_service.redact_text(text, result.phi_spans)
+            redacted_text = (
+                await maybe_redacted if inspect.isawaitable(maybe_redacted) else maybe_redacted
             )
-            logger.info(f"[{job_id}] Graph ingestion complete")
+            
+            # Run ingestion pipeline
+            # Note: We use project_{project_id} as the collection name
+            collection_name = f"project_{project_id}"
+            pipeline = create_document_pipeline(collection_name=collection_name)
+            
+            ctx = PipelineContext(
+                text=redacted_text,
+                filename=filename,
+                metadata={
+                    "project_id": project_id,
+                    "job_id": job_id,
+                    "transcript_id": transcript_id,
+                    "source": "compliance_orchestrator",
+                    "is_redacted": True,
+                    "original_phi_count": len(result.phi_spans)
+                }
+            )
+            
+            ctx = pipeline.run(ctx)
+            logger.info(
+                f"[{job_id}] Vector ingestion complete (Collection: {collection_name}, Chunks: {ctx.result.get('chunks_indexed', 0)})"
+            )
+            
         except Exception as e:
-            logger.warning(f"[{job_id}] Graph ingestion failed: {e}")
+            logger.error(f"[{job_id}] Vector ingestion failed: {e}")
 
         # Build result
         analysis_result = {

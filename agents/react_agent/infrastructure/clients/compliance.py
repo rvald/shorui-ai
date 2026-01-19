@@ -10,7 +10,7 @@ import httpx
 from .base import ServiceStatus
 
 # Configuration
-COMPLIANCE_BASE_URL = os.getenv("COMPLIANCE_SERVICE_URL", "http://localhost:8000/compliance")
+COMPLIANCE_BASE_URL = os.getenv("COMPLIANCE_SERVICE_URL", "http://localhost:8082/compliance")
 DEFAULT_TIMEOUT = 60.0
 
 DEFAULT_POOL_LIMITS = httpx.Limits(

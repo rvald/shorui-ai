@@ -78,9 +78,13 @@ class HIPAAGraphIngestionService:
 
         # Use injected storage backend or default factory
         self.storage = storage_backend or get_storage_backend()
+        
+        # Ensure PHI bucket exists
+        self.storage.ensure_bucket_exists(self._phi_bucket)
 
         # Audit service
         self._audit_service = AuditService() if AuditService else None
+        logger.info(f"Initialized HIPAAGraphIngestionService with bucket '{self._phi_bucket}' and database '{self._database}'")
 
     async def ingest_transcript(
         self,
@@ -114,7 +118,7 @@ class HIPAAGraphIngestionService:
         )
 
         # 1. Store full text encrypted in storage
-        transcript_id = str(uuid.uuid4())
+        transcript_id = extraction_result.transcript_id or str(uuid.uuid4())
         transcript_pointer = await self._store_encrypted_text(
             text=text,
             filename=f"transcripts/{transcript_id}.enc",
@@ -176,6 +180,27 @@ class HIPAAGraphIngestionService:
                     project_id=project_id,
                 )
                 stats["relationships_created"] += 1
+
+                # 4. Link to Regulations (if citations exist in extraction result)
+                # Note: This assumes compliance analysis has been merged into spans
+                # We'll look for citations in the extraction_result.compliance_analysis
+                if extraction_result.compliance_analysis:
+                    for analysis in extraction_result.compliance_analysis.phi_analyses:
+                        if analysis.phi_span_index == extraction_result.phi_spans.index(span):
+                            citation = analysis.regulation_citation
+                            if citation:
+                                # Extract section (e.g., "164.514")
+                                reg_id = citation.split("(")[0].strip().replace("§", "").replace("45 CFR ", "")
+                                
+                                session.execute_write(
+                                    self._create_relationship,
+                                    from_id=phi_span_id,
+                                    to_id=reg_id,
+                                    rel_type="VIOLATES",
+                                    project_id=project_id,
+                                    to_label="Regulation"
+                                )
+                                stats["relationships_created"] += 1
 
         # Log audit event
         await self._log_audit_event(
@@ -283,7 +308,7 @@ class HIPAAGraphIngestionService:
             return
 
         try:
-            await self._audit_service.log_event(
+            await self._audit_service.log(
                 event_type=event_type,
                 description=description,
                 resource_type=resource_type,
@@ -300,6 +325,7 @@ class HIPAAGraphIngestionService:
         tx, transcript_id, project_id, filename, file_hash, storage_pointer, phi_count, text_length
     ):
         """Create a Transcript node in Neo4j (no PHI stored)."""
+        logger.info(f"Executing Cypher to create Transcript node: {transcript_id} for project {project_id}")
         query = """
         MERGE (t:Transcript {id: $transcript_id, project_id: $project_id})
         SET t.filename = $filename,
@@ -362,11 +388,20 @@ class HIPAAGraphIngestionService:
         )
 
     @staticmethod
-    def _create_relationship(tx, from_id, to_id, rel_type, project_id):
+    def _create_relationship(tx, from_id, to_id, rel_type, project_id, to_label=None):
         """Create a relationship between two nodes."""
-        query = f"""
-        MATCH (a {{id: $from_id, project_id: $project_id}})
-        MATCH (b {{id: $to_id, project_id: $project_id}})
-        MERGE (a)-[r:{rel_type}]->(b)
-        """
+        if to_label == "Regulation":
+            # Regulations are global (no project_id check for them specifically if not needed)
+            # but we can check if they exist first.
+            query = f"""
+            MATCH (a {{id: $from_id, project_id: $project_id}})
+            MATCH (b:Regulation {{id: $to_id}})
+            MERGE (a)-[r:{rel_type}]->(b)
+            """
+        else:
+            query = f"""
+            MATCH (a {{id: $from_id, project_id: $project_id}})
+            MATCH (b {{id: $to_id, project_id: $project_id}})
+            MERGE (a)-[r:{rel_type}]->(b)
+            """
         tx.run(query, from_id=from_id, to_id=to_id, project_id=project_id)

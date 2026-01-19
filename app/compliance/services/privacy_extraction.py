@@ -16,7 +16,7 @@ from typing import Any
 
 from loguru import logger
 
-from app.compliance.protocols import AuditLogger, PHIDetector, RegulationRetriever
+from app.compliance.protocols import AuditLogger, GraphIngestor, PHIDetector, RegulationRetriever
 from app.compliance.services.context_optimizer import (
     build_compact_prompt,
     build_optimized_batches,
@@ -116,6 +116,7 @@ class PrivacyAwareExtractionService:
         phi_detector: PHIDetector,
         regulation_retriever: RegulationRetriever,
         audit_logger: AuditLogger | None = None,
+        graph_ingestor: GraphIngestor | None = None,
     ):
         """
         Initialize the privacy-aware extraction service.
@@ -124,15 +125,19 @@ class PrivacyAwareExtractionService:
             phi_detector: Service for detecting PHI
             regulation_retriever: Service for retrieving HIPAA regulations
             audit_logger: Service for audit logging (optional)
+            graph_ingestor: Service for graph ingestion (optional)
         """
         self.phi_detector = phi_detector
         self._regulation_retriever = regulation_retriever
         self._audit_logger = audit_logger
+        self.graph_ingestor = graph_ingestor
 
     async def extract(
         self,
         text: str,
         transcript_id: str | None = None,
+        filename: str = "transcript.txt",
+        project_id: str = "default",
         skip_llm: bool = False,
     ) -> PHIExtractionResult:
         """
@@ -175,13 +180,30 @@ class PrivacyAwareExtractionService:
 
         processing_time_ms = int((time.time() - start_time) * 1000)
 
-        return PHIExtractionResult(
+        result = PHIExtractionResult(
             transcript_id=transcript_id or "unknown",
             phi_spans=phi_spans,
             processing_time_ms=processing_time_ms,
             detector_versions={"presidio": "2.2", "llm": "gpt-4o-mini"},
             compliance_analysis=compliance_result,
         )
+
+        # Step 3: Graph Ingestion (if enabled and result exists)
+        logger.info(f"Checking for graph ingestor: {self.graph_ingestor is not None}, result exists: {result is not None}")
+        if self.graph_ingestor and result:
+            logger.info(f"Calling ingest_transcript for {filename} (project: {project_id})")
+            print(f"DEBUG: Calling ingest_transcript for {filename} (project: {project_id})")
+            try:
+                await self.graph_ingestor.ingest_transcript(
+                    text=text,
+                    extraction_result=result,
+                    filename=filename,
+                    project_id=project_id,
+                )
+            except Exception as e:
+                logger.warning(f"Graph ingestion failed: {e}")
+
+        return result
 
     async def extract_batch(
         self,
@@ -439,6 +461,36 @@ class PrivacyAwareExtractionService:
             )
         except Exception as e:
             logger.error(f"Failed to log audit event: {e}")
+
+
+    @staticmethod
+    def redact_text(text: str, phi_spans: list[PHISpan]) -> str:
+        """
+        Replace PHI spans in text with a category token (e.g., "[NAME]").
+
+        Details:
+            - Sorts spans descending by start position to safely modify string
+            - Replaces content with a category tag
+        """
+        if not phi_spans:
+            return text
+
+        # Sort spans by start_char descending to avoid offset issues
+        # We also need to handle overlapping spans if any (Presidio usually handles this, but good to be safe)
+        # For simple redaction, we assume non-overlapping from detector.
+        sorted_spans = sorted(phi_spans, key=lambda x: x.start_char, reverse=True)
+        chars = list(text)
+
+        for span in sorted_spans:
+            replacement = f"[{span.category.value}]"
+            # Ensure we don't go out of bounds or accidentally insert.
+            start = max(0, min(span.start_char, len(chars)))
+            end = max(start, min(span.end_char, len(chars)))
+            if start >= len(chars) or end <= start:
+                continue
+            chars[start:end] = list(replacement)
+
+        return "".join(chars)
 
 
 def compute_phi_hash(text: str) -> str:

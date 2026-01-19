@@ -39,10 +39,10 @@ class MinIOStorage:
         self.processed_bucket = settings.MINIO_BUCKET_PROCESSED
 
         # Ensure buckets exist
-        self._ensure_bucket_exists(self.raw_bucket)
-        self._ensure_bucket_exists(self.processed_bucket)
+        self.ensure_bucket_exists(self.raw_bucket)
+        self.ensure_bucket_exists(self.processed_bucket)
 
-    def _ensure_bucket_exists(self, bucket_name: str) -> None:
+    def ensure_bucket_exists(self, bucket_name: str) -> None:
         """Create bucket if it doesn't exist."""
         try:
             if not self._client.bucket_exists(bucket_name):

@@ -16,6 +16,10 @@ from app.rag.routes import router as rag_router
 from app.agent.routes import router as agent_router
 from app.compliance.routes import router as compliance_router
 from shorui_core.config import settings
+from shorui_core.logging import setup_logging
+
+# Initialize logging
+setup_logging()
 
 # Create the unified FastAPI app
 app = FastAPI(

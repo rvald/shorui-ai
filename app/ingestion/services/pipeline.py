@@ -197,6 +197,10 @@ class QdrantIndexer(PipelineStage):
 
         # Build metadata for each chunk
         base_metadata = ctx.metadata.copy()
+        if ctx.filename and "filename" not in base_metadata:
+            base_metadata["filename"] = ctx.filename
+        if ctx.content_type and "content_type" not in base_metadata:
+            base_metadata["content_type"] = ctx.content_type
         metadata_list = [
             {**base_metadata, "chunk_index": i}
             for i in range(len(ctx.chunks))

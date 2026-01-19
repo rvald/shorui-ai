@@ -58,6 +58,7 @@ def get_privacy_extraction_service() -> PrivacyAwareExtractionService:
         phi_detector=get_phi_detector_service(),
         regulation_retriever=get_regulation_retriever(),
         audit_logger=get_audit_logger(),
+        graph_ingestor=get_graph_ingestor(),
     )
 
 

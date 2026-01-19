@@ -29,8 +29,9 @@ COPY shorui_core/ ./shorui_core/
 COPY app/ ./app/
 COPY agents/ ./agents/
 
-# Set Python path
+# Set Python path and unbuffer output
 ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 
 # Expose port
 EXPOSE 8082
@@ -40,4 +41,4 @@ HEALTHCHECK --interval=30s --timeout=3s \
     CMD curl -f http://localhost:8082/health || exit 1
 
 # Run with multiple workers (Redis session storage enables cross-worker sessions)
-CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8082", "--workers", "4"]
+CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8082", "--workers", "1"]

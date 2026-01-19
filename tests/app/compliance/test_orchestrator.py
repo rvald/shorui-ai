@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock, patch, AsyncMock, ANY
 
 from app.compliance.services.orchestrator import ComplianceOrchestrator
 
@@ -54,7 +54,9 @@ async def test_analyze_transcript_flow(mock_privacy_service, mock_report_service
     )
     
     # Verify PHI Extraction
-    mock_privacy_service.extract.assert_called_once_with("Clnical text", skip_llm=False)
+    mock_privacy_service.extract.assert_called_once_with(
+        "Clnical text", transcript_id=ANY, skip_llm=False
+    )
     
     # Verify Report Generation
     mock_report_service.generate_report.assert_called_once_with(

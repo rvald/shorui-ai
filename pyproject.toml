@@ -152,3 +152,7 @@ indent-style = "space"
 dev = [
     "hypothesis>=6.150.2",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

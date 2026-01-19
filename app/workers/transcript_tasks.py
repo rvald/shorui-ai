@@ -48,3 +48,18 @@ def analyze_clinical_transcript(
             project_id=project_id,
         )
     )
+
+async def _analyze_transcript_async(
+    job_id: str,
+    text: str,
+    filename: str,
+    project_id: str,
+) -> dict:
+    """Helper for synchronous API calls."""
+    orchestrator = get_compliance_orchestrator()
+    return await orchestrator.analyze_transcript(
+        job_id=job_id,
+        text=text,
+        filename=filename,
+        project_id=project_id,
+    )

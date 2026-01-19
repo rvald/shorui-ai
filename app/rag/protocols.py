@@ -78,7 +78,11 @@ class GraphRetriever(Protocol):
     """Protocol for graph-based reasoning."""
     
     async def retrieve_and_reason(
-        self, hits: list[dict[str, Any]], project_id: str, is_gap_query: bool = False
+        self, 
+        hits: list[dict[str, Any]], 
+        project_id: str, 
+        is_gap_query: bool = False,
+        query_analysis: dict[str, Any] | None = None
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """
         Reason over search hits using the graph.
