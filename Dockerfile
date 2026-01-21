@@ -8,6 +8,8 @@ COPY --from=ghcr.io/astral-sh/uv:0.8.10 /uv /uvx /bin/
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     tesseract-ocr \
+    build-essential \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
 
