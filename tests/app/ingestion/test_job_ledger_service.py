@@ -22,7 +22,10 @@ class TestJobLedgerCreate:
         service = JobLedgerService()
 
         job_id = service.create_job(
-            project_id="project-1", filename="doc.pdf", storage_path="raw/project-1/uuid_doc.pdf"
+            tenant_id="tenant-1",
+            project_id="project-1",
+            job_type="ingestion_document",
+            raw_pointer="raw/tenant-1/project-1/uuid_doc.pdf",
         )
 
         assert job_id is not None
@@ -36,7 +39,10 @@ class TestJobLedgerCreate:
         mock_cursor = mock_postgres["cursor"]
 
         service.create_job(
-            project_id="project-1", filename="doc.pdf", storage_path="raw/project-1/uuid_doc.pdf"
+            tenant_id="tenant-1",
+            project_id="project-1",
+            job_type="ingestion_document",
+            raw_pointer="raw/tenant-1/project-1/uuid_doc.pdf",
         )
 
         # Should have executed an INSERT
@@ -56,9 +62,10 @@ class TestJobLedgerCreate:
         provided_id = "my-custom-job-id-12345"
 
         returned_id = service.create_job(
+            tenant_id="tenant-1",
             project_id="project-1",
-            filename="doc.pdf",
-            storage_path="raw/project-1/uuid_doc.pdf",
+            job_type="ingestion_document",
+            raw_pointer="raw/tenant-1/project-1/uuid_doc.pdf",
             job_id=provided_id,
         )
 
@@ -78,9 +85,10 @@ class TestJobLedgerCreate:
         provided_id = "route-generated-uuid-abc123"
 
         service.create_job(
+            tenant_id="tenant-1",
             project_id="project-1",
-            filename="doc.pdf",
-            storage_path="raw/project-1/uuid_doc.pdf",
+            job_type="ingestion_document",
+            raw_pointer="raw/tenant-1/project-1/uuid_doc.pdf",
             job_id=provided_id,
         )
 
@@ -133,13 +141,19 @@ class TestJobLedgerIdempotency:
         service = JobLedgerService()
         mock_cursor = mock_postgres["cursor"]
 
-        # Simulate existing job found (3 columns: job_id, status, completed_at)
-        mock_cursor.fetchone.return_value = ("existing-job-id", "completed", None)
+        # Simulate existing job found (3 columns: job_id, status, result_pointer)
+        mock_cursor.fetchone.return_value = ("existing-job-id", "completed", "processed/results/existing.json")
 
-        result = service.check_idempotency("project-1", "doc.pdf", "abc123hash")
+        result = service.check_idempotency(
+            idempotency_key="abc123hash",
+            job_type="ingestion_document",
+            tenant_id="tenant-1",
+            project_id="project-1",
+        )
 
         assert result is not None
         assert result["job_id"] == "existing-job-id"
+        assert result["status"] == "completed"
 
     def test_check_idempotency_returns_none_for_new(self, mock_postgres):
         """If document is new, return None."""
@@ -151,7 +165,12 @@ class TestJobLedgerIdempotency:
         # No existing job
         mock_cursor.fetchone.return_value = None
 
-        result = service.check_idempotency("project-1", "new_doc.pdf", "newhash")
+        result = service.check_idempotency(
+            idempotency_key="newhash",
+            job_type="ingestion_document",
+            tenant_id="tenant-1",
+            project_id="project-1",
+        )
 
         assert result is None
 

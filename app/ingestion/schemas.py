@@ -17,6 +17,12 @@ from pydantic import BaseModel, Field
 # ==============================================================================
 
 
+class JobResult(BaseModel):
+    result_pointer: str | None = None
+    items_indexed: int | None = None
+    collection_name: str | None = None
+
+
 class JobStatus(BaseModel):
     """Response model for job status."""
 
@@ -24,7 +30,7 @@ class JobStatus(BaseModel):
     status: str
     progress: int | None = None
     error: str | None = None
-    result: dict | None = None
+    result: JobResult | None = None
 
 
 class UploadResponse(BaseModel):
@@ -32,3 +38,5 @@ class UploadResponse(BaseModel):
 
     job_id: str
     message: str
+    raw_pointer: str | None = None
+    status: str | None = None

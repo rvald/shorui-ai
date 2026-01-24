@@ -5,6 +5,8 @@ This module provides a singleton MinIO client that can be shared
 across all services that need object storage access.
 """
 
+from __future__ import annotations
+
 from loguru import logger
 from minio import Minio
 

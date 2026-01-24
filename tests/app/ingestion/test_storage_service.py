@@ -23,9 +23,14 @@ class TestStorageServiceUpload:
         service = StorageService()
 
         content = b"Test document content"
-        path = service.upload(content=content, filename="test.pdf", project_id="test-project")
+        path = service.upload(
+            content=content,
+            filename="test.pdf",
+            tenant_id="test-tenant",
+            project_id="test-project",
+        )
 
-        # Should return a path like "raw/test-project/uuid_test.pdf"
+        # Should return a path like "raw/tenant/project/uuid_test.pdf"
         assert path is not None
         assert "test-project" in path
         assert "test.pdf" in path
@@ -38,7 +43,12 @@ class TestStorageServiceUpload:
         mock_client = mock_minio_connector
 
         content = b"Test content"
-        service.upload(content=content, filename="doc.pdf", project_id="proj-1")
+        service.upload(
+            content=content,
+            filename="doc.pdf",
+            tenant_id="tenant-1",
+            project_id="proj-1",
+        )
 
         # Verify put_object was called
         mock_client.put_object.assert_called_once()
@@ -51,7 +61,12 @@ class TestStorageServiceUpload:
         mock_client = mock_minio_connector
 
         content = b"Content"
-        service.upload(content, "file.pdf", "project-1")
+        service.upload(
+            content=content,
+            filename="file.pdf",
+            tenant_id="tenant-1",
+            project_id="project-1",
+        )
 
         # First argument should be the bucket name
         call_args = mock_client.put_object.call_args

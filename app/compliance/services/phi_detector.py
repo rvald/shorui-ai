@@ -8,6 +8,7 @@ This service is for DETECTION and AUDIT only - it tags PHI locations
 but does not mask or redact (since we're using a self-hosted LLM).
 """
 
+from __future__ import annotations
 from loguru import logger
 from presidio_analyzer import AnalyzerEngine, RecognizerResult
 from presidio_analyzer.nlp_engine import NlpEngineProvider

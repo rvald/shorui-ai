@@ -8,6 +8,7 @@ in the shorui-ai system. It handles:
 - Deserialization from Qdrant ScoredPoint
 """
 
+from __future__ import annotations
 import uuid
 from abc import ABC
 from typing import Any, Generic, TypeVar

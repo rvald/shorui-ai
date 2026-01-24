@@ -7,6 +7,7 @@ This module provides the API endpoints for the compliance module, including:
 - HIPAA regulation statistics
 """
 
+from __future__ import annotations
 import uuid
 from typing import Union
 

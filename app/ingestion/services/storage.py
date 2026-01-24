@@ -8,6 +8,8 @@ This module provides:
 The storage backend is selected based on the USE_LOCAL_STORAGE setting.
 """
 
+from __future__ import annotations
+
 import io
 import uuid
 
@@ -55,32 +57,36 @@ class MinIOStorage:
         self,
         content: bytes,
         filename: str,
+        tenant_id: str,
         project_id: str,
         bucket: str | None = None,
+        prefix: str | None = None,
     ) -> str:
         """
-        Upload a document to MinIO.
+        Upload content to MinIO.
 
         Args:
             content: The file content as bytes.
             filename: Original filename.
-            project_id: Project identifier for organization.
+            tenant_id: Tenant namespace.
+            project_id: Project identifier.
             bucket: Target bucket (defaults to raw bucket).
+            prefix: Optional prefix inside the bucket (e.g., "raw", "results").
 
         Returns:
-            str: The storage path (bucket/project_id/uuid_filename).
+            str: The storage path (bucket/prefix/tenant/project/uuid_filename).
         """
         bucket = bucket or self.raw_bucket
 
-        # Generate unique object name
         unique_id = str(uuid.uuid4())[:8]
-        object_name = f"{project_id}/{unique_id}_{filename}"
+        components = [prefix, tenant_id, project_id, f"{unique_id}_{filename}"]
+        object_name = "/".join([c for c in components if c])
 
         # Upload to MinIO
         content_stream = io.BytesIO(content)
         content_length = len(content)
 
-        logger.info(f"Uploading {filename} to {bucket}/{object_name}")
+        logger.info(f"Uploading document to {bucket}/{object_name}")
 
         self._client.put_object(
             bucket_name=bucket,
@@ -94,6 +100,28 @@ class MinIOStorage:
         logger.info(f"Uploaded to {storage_path}")
 
         return storage_path
+
+    def upload_json(
+        self,
+        payload: dict,
+        filename: str,
+        tenant_id: str,
+        project_id: str,
+        bucket: str | None = None,
+        prefix: str | None = None,
+    ) -> str:
+        """Upload JSON payload as bytes."""
+        import json
+
+        content = json.dumps(payload).encode("utf-8")
+        return self.upload(
+            content=content,
+            filename=filename,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            bucket=bucket,
+            prefix=prefix,
+        )
 
     def download(self, storage_path: str) -> bytes:
         """

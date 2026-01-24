@@ -20,7 +20,7 @@ services:
       # Qdrant
       - USE_QDRANT_CLOUD=false
       - QDRANT_DATABASE_HOST=qdrant
-      - QDRANT_DATABASE_PORT=6335
+      - QDRANT_DATABASE_PORT=6333
       # Neo4j
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
@@ -62,7 +62,7 @@ services:
       # Qdrant
       - USE_QDRANT_CLOUD=false
       - QDRANT_DATABASE_HOST=qdrant
-      - QDRANT_DATABASE_PORT=6335
+      - QDRANT_DATABASE_PORT=6333
       # Neo4j
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_USER=neo4j
@@ -179,9 +179,9 @@ services:
     restart: on-failure
     container_name: qdrant
     ports:
-      - "6335:6335"
+      - "6333:6333"
     environment:
-      - QDRANT__SERVICE__HTTP_PORT=6335
+      - QDRANT__SERVICE__HTTP_PORT=6333
     volumes:
       - qdrant_data:/qdrant/storage
 

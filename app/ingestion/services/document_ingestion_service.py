@@ -8,6 +8,8 @@ This service handles:
 4. Project-specific collection management
 """
 
+from __future__ import annotations
+
 import os
 import tempfile
 from typing import Any
@@ -76,7 +78,7 @@ class DocumentIngestionService:
         Returns:
             dict: Ingestion statistics including chunks_created, collection_name
         """
-        logger.info(f"Ingesting document: {filename} for project {project_id}")
+        logger.info(f"Ingesting document for project {project_id}")
 
         # Determine target collection
         target_collection = collection_name or f"project_{project_id}"
@@ -85,7 +87,7 @@ class DocumentIngestionService:
         text = self._extract_text(content, filename, content_type)
 
         if not text or not text.strip():
-            logger.warning(f"No text content extracted from {filename}")
+            logger.warning("No text content extracted from document")
             return {
                 "chunks_created": 0,
                 "collection_name": target_collection,
@@ -97,14 +99,14 @@ class DocumentIngestionService:
         chunks = self._chunking.chunk(text)
 
         if not chunks:
-            logger.warning(f"No chunks created from document: {filename}")
+            logger.warning("No chunks created from document")
             return {
                 "chunks_created": 0,
                 "collection_name": target_collection,
                 "success": False,
             }
 
-        logger.info(f"Created {len(chunks)} chunks from {filename}")
+        logger.info(f"Created {len(chunks)} chunks from document")
 
         # Build metadata for each chunk
         metadata_list = [
@@ -180,7 +182,7 @@ class DocumentIngestionService:
             return self._extract_pdf_text(content)
 
         # Unsupported file type
-        logger.warning(f"Unsupported file type: {content_type} ({filename})")
+        logger.warning(f"Unsupported file type: {content_type}")
         return ""
 
     def _extract_pdf_text(self, content: bytes) -> str:

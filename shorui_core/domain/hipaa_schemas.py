@@ -8,6 +8,7 @@ This module defines the core domain models for HIPAA compliance:
 - AuditEvent: Tamper-evident audit trail entry
 """
 
+from __future__ import annotations
 import uuid
 from datetime import datetime
 from enum import Enum

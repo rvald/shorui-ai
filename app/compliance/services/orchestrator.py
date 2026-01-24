@@ -28,7 +28,7 @@ class ComplianceOrchestrator:
         """
         Execute the analysis flow.
         """
-        logger.info(f"[{job_id}] Orchestrating transcript analysis for {filename}")
+        logger.info(f"[{job_id}] Orchestrating transcript analysis")
 
         transcript_id = str(uuid.uuid4())
 

@@ -7,6 +7,7 @@ Manages token budget by:
 3. Token-aware batching (respect input limits)
 """
 
+from __future__ import annotations
 from dataclasses import dataclass
 
 import tiktoken

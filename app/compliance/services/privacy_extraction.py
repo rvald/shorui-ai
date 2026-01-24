@@ -9,6 +9,7 @@ Flow:
 - All PHI detections are logged to audit trail
 """
 
+from __future__ import annotations
 import asyncio
 import hashlib
 import time
@@ -191,8 +192,8 @@ class PrivacyAwareExtractionService:
         # Step 3: Graph Ingestion (if enabled and result exists)
         logger.info(f"Checking for graph ingestor: {self.graph_ingestor is not None}, result exists: {result is not None}")
         if self.graph_ingestor and result:
-            logger.info(f"Calling ingest_transcript for {filename} (project: {project_id})")
-            print(f"DEBUG: Calling ingest_transcript for {filename} (project: {project_id})")
+            logger.info(f"Calling ingest_transcript (project: {project_id})")
+            print(f"DEBUG: Calling ingest_transcript (project: {project_id})")
             try:
                 await self.graph_ingestor.ingest_transcript(
                     text=text,

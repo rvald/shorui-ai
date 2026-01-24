@@ -102,7 +102,7 @@ sequence = ["start-build", { shell = "echo 'Waiting for services...' && sleep 60
 shell = "curl -s http://localhost:8082/health | python -m json.tool"
 
 [tool.poe.tasks.qdrant-stats]
-shell = "curl -s http://localhost:6335/collections | python -m json.tool"
+shell = "curl -s http://localhost:6333/collections | python -m json.tool"
 
 
 # ----------------------------------

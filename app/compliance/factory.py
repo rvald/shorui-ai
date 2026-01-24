@@ -5,6 +5,8 @@ This module provides factory functions to create instances of compliance service
 handling dependency injection and configuration.
 """
 
+from __future__ import annotations
+
 from functools import lru_cache
 
 from app.compliance.protocols import (

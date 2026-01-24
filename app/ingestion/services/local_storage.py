@@ -5,6 +5,8 @@ This implementation stores files on the local filesystem,
 useful for development and testing without MinIO.
 """
 
+from __future__ import annotations
+
 import uuid
 from pathlib import Path
 
@@ -33,14 +35,18 @@ class LocalStorage:
         """
         self.base_path = Path(base_path)
         self.base_path.mkdir(parents=True, exist_ok=True)
+        self.raw_bucket = "raw"
+        self.processed_bucket = "processed"
         logger.info(f"LocalStorage initialized at {self.base_path}")
 
     def upload(
         self,
         content: bytes,
         filename: str,
+        tenant_id: str,
         project_id: str,
         bucket: str | None = None,
+        prefix: str | None = None,
     ) -> str:
         """
         Upload content to local filesystem.
@@ -48,30 +54,54 @@ class LocalStorage:
         Args:
             content: The file content as bytes.
             filename: Original filename.
+            tenant_id: Tenant namespace.
             project_id: Project identifier for organization.
             bucket: Optional bucket name (used as subdirectory).
+            prefix: Optional prefix (e.g., "raw", "results").
 
         Returns:
-            str: The storage path (bucket/project_id/uuid_filename).
+            str: The storage path (bucket/prefix/tenant/project/uuid_filename).
         """
         bucket = bucket or "raw"
 
         # Create directory structure
-        target_dir = self.base_path / bucket / project_id
+        target_dir = self.base_path / bucket
+        if prefix:
+            target_dir = target_dir / prefix
+        target_dir = target_dir / tenant_id / project_id
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        # Generate unique filename
         unique_id = str(uuid.uuid4())[:8]
         target_file = target_dir / f"{unique_id}_{filename}"
 
-        # Write file
         target_file.write_bytes(content)
 
-        # Return relative path from base
-        storage_path = f"{bucket}/{project_id}/{unique_id}_{filename}"
+        components = [bucket, prefix, tenant_id, project_id, f"{unique_id}_{filename}"]
+        storage_path = "/".join([c for c in components if c])
         logger.info(f"Uploaded to {storage_path}")
 
         return storage_path
+
+    def upload_json(
+        self,
+        payload: dict,
+        filename: str,
+        tenant_id: str,
+        project_id: str,
+        bucket: str | None = None,
+        prefix: str | None = None,
+    ) -> str:
+        import json
+
+        content = json.dumps(payload).encode("utf-8")
+        return self.upload(
+            content=content,
+            filename=filename,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            bucket=bucket,
+            prefix=prefix,
+        )
 
     def download(self, storage_path: str) -> bytes:
         """

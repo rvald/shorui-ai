@@ -5,6 +5,8 @@ This service handles indexing embedded chunks into the Qdrant vector
 database, including collection management.
 """
 
+from __future__ import annotations
+
 import uuid
 from typing import Any
 

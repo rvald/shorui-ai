@@ -6,21 +6,38 @@ This module handles general document ingestion endpoints:
 - Check processing status
 """
 
+from __future__ import annotations
+
 import uuid
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from loguru import logger
 
 from app.ingestion.schemas import JobStatus, UploadResponse
+from app.ingestion.services.job_ledger import JobLedgerService
+from app.ingestion.services.storage import get_storage_backend
+from app.ingestion.services.tenant import resolve_tenant_from_project
 from app.workers.tasks import process_document
 
 router = APIRouter()
+_storage_service = None
+
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB limit
+ALLOWED_CONTENT_TYPES = {"application/pdf", "text/plain"}
 
 
 @router.get("/health")
 def ingestion_health():
     """Health check for the ingestion module."""
     return {"status": "ok", "module": "ingestion"}
+
+
+def get_storage_service():
+    """Lazily construct storage backend to avoid side effects at import."""
+    global _storage_service
+    if _storage_service is None:
+        _storage_service = get_storage_backend()
+    return _storage_service
 
 
 @router.post("/documents", response_model=UploadResponse, status_code=202)
@@ -54,8 +71,9 @@ async def upload_document(
     Returns:
         UploadResponse: Contains job_id for tracking.
     """
-    # Generate a unique job ID
-    job_id = str(uuid.uuid4())
+    tenant_id = resolve_tenant_from_project(project_id)
+    request_id = str(uuid.uuid4())
+    ledger = JobLedgerService()
 
     # Read file content
     file_content = await file.read()
@@ -63,19 +81,97 @@ async def upload_document(
     filename = file.filename or "unknown"
 
     logger.info(
-        f"Received {document_type} upload: {filename} ({content_type}) for project {project_id}"
+        f"[{request_id}] Received {document_type} upload for project={project_id} tenant={tenant_id}"
+    )
+
+    storage_service = get_storage_service()
+
+    byte_size = len(file_content)
+    if byte_size > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="File too large")
+
+    if content_type not in ALLOWED_CONTENT_TYPES:
+        raise HTTPException(status_code=415, detail="Unsupported content type")
+
+    # Compute idempotency key before upload to avoid duplicate work
+    content_hash = ledger.compute_content_hash(file_content)
+    idempotency_key = ledger.build_idempotency_key(
+        content_hash=content_hash,
+        tenant_id=tenant_id,
+        project_id=project_id,
+        document_type=document_type,
+        content_type=content_type,
+    )
+
+    existing = ledger.check_idempotency(
+        idempotency_key=idempotency_key,
+        job_type="ingestion_document",
+        tenant_id=tenant_id,
+        project_id=project_id,
+    )
+    if existing:
+        logger.info(f"Idempotent hit for upload (job={existing['job_id']}, status={existing['status']})")
+        return UploadResponse(
+            job_id=existing["job_id"],
+            message="Document already processed",
+            raw_pointer=None,
+            status="skipped" if existing["status"] == "completed" else existing["status"],
+        )
+
+    # Upload raw content to storage and record artifact
+    try:
+        raw_pointer = storage_service.upload(
+            content=file_content,
+            filename=filename,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            bucket=storage_service.raw_bucket,
+        )
+    except Exception as e:
+        logger.error(f"[{request_id}] Storage upload failed: {type(e).__name__}")
+        raise HTTPException(status_code=503, detail="Storage temporarily unavailable")
+
+    job_id = ledger.create_job(
+        tenant_id=tenant_id,
+        project_id=project_id,
+        job_type="ingestion_document",
+        job_id=str(uuid.uuid4()),
+        status="pending",
+        progress=0,
+        idempotency_key=idempotency_key,
+        request_id=request_id,
+        raw_pointer=raw_pointer,
+        content_type=content_type,
+        document_type=document_type,
+        byte_size=byte_size,
+        input_artifacts=[
+            {"type": "raw_upload", "pointer": raw_pointer, "filename": filename}
+        ],
+    )
+
+    ledger.register_artifact(
+        tenant_id=tenant_id,
+        project_id=project_id,
+        artifact_type="raw_upload",
+        storage_pointer=raw_pointer,
+        content_type=content_type,
+        byte_size=byte_size,
+        sha256=content_hash,
+        created_by_job_id=job_id,
     )
 
     # Queue task via Celery with document_type for routing
     process_document.delay(
         job_id=job_id,
-        file_content=file_content,
+        tenant_id=tenant_id,
+        project_id=project_id,
+        raw_pointer=raw_pointer,
         filename=filename,
         content_type=content_type,
-        project_id=project_id,
         document_type=document_type,
         index_to_vector=index_to_vector,
         index_to_graph=index_to_graph,
+        idempotency_key=idempotency_key,
         # Regulation-specific metadata
         source=source,
         title=title,
@@ -84,7 +180,7 @@ async def upload_document(
 
     logger.info(f"[{job_id}] Queued {document_type} processing via Celery")
 
-    return UploadResponse(job_id=job_id, message=f"Document '{filename}' queued for processing")
+    return UploadResponse(job_id=job_id, message="Document queued for processing", raw_pointer=None, status="pending")
 
 
 @router.get("/documents/{job_id}/status", response_model=JobStatus)
@@ -110,17 +206,25 @@ def get_document_status(job_id: str):
         job_info = ledger_service.get_job(job_id)
 
         if job_info:
+            collection_name = None
+            result_artifacts = job_info.get("result_artifacts")
+            if isinstance(result_artifacts, list) and result_artifacts:
+                collection_name = result_artifacts[0].get("collection_name")
+
+            result_block = None
+            if job_info.get("result_pointer") or job_info.get("items_indexed"):
+                result_block = {
+                    "result_pointer": job_info.get("result_pointer"),
+                    "items_indexed": job_info.get("items_indexed"),
+                    "collection_name": collection_name,
+                }
+
             return JobStatus(
                 job_id=job_info["job_id"],
                 status=job_info["status"],
                 progress=job_info.get("progress"),
                 error=job_info.get("error"),
-                result={
-                    "items_indexed": job_info.get("items_indexed"),
-                    "storage_path": job_info.get("storage_path"),
-                }
-                if job_info.get("items_indexed")
-                else None,
+                result=result_block,
             )
         else:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")

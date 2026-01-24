@@ -1,7 +1,8 @@
 from typing import Protocol, Any, Dict
+from datetime import datetime
 
 from app.ingestion.services.document_ingestion_service import DocumentIngestionService
-from app.ingestion.services.storage import StorageService
+from app.ingestion.services.storage import get_storage_backend
 from loguru import logger
 
 class DocumentProcessor(Protocol):
@@ -28,7 +29,7 @@ class GeneralDocumentProcessor:
         index_to_vector = kwargs.get("index_to_vector", True)
 
         if not index_to_vector:
-            logger.info(f"Skipping vector indexing for {filename}")
+            logger.info("Skipping vector indexing for document")
             return {
                 "document_type": "general",
                 "chunks_created": 0,
@@ -111,35 +112,32 @@ class IngestionOrchestrator:
     """
     
     def __init__(self):
-        self.storage_service = StorageService()
+        self.storage_service = get_storage_backend()
         self.processors: Dict[str, DocumentProcessor] = {
             "general": GeneralDocumentProcessor(),
             "hipaa_regulation": HipaaRegulationProcessor(),
         }
+        self.raw_bucket = getattr(self.storage_service, "raw_bucket", None)
+        self.processed_bucket = getattr(self.storage_service, "processed_bucket", None)
 
     def process(
         self,
         job_id: str,
-        file_content: bytes,
+        raw_pointer: str,
         filename: str,
+        tenant_id: str,
         project_id: str,
+        content_type: str,
         document_type: str = "general",
         **kwargs
     ) -> Dict[str, Any]:
         """
         Execute the ingestion flow.
         """
-        logger.info(f"[{job_id}] Orchestrating ingestion for {filename} (type={document_type})")
+        logger.info(f"[{job_id}] Orchestrating ingestion (type={document_type})")
 
-        # 1. Upload to Storage
-        storage_path = None
-        try:
-            # Note: storage_service.upload expects bytes
-            storage_path = self.storage_service.upload(file_content, filename, project_id)
-            logger.info(f"[{job_id}] Uploaded to MinIO: {storage_path}")
-        except Exception as e:
-            # We log but continue, as processing might still be possible (or we want to fail later)
-            logger.warning(f"[{job_id}] MinIO upload failed: {e}")
+        # 1. Download raw content by pointer
+        file_content = self.storage_service.download(raw_pointer)
 
         # 2. Select Processor
         processor = self.processors.get(document_type)
@@ -147,21 +145,42 @@ class IngestionOrchestrator:
             raise ValueError(f"Unsupported document_type: {document_type}")
 
         # 3. Process
-        # We pass storage_path in kwargs in case processors need it (future proofing)
         stats = processor.process(
             content=file_content, 
             filename=filename, 
             project_id=project_id,
-            storage_path=storage_path,
+            storage_path=raw_pointer,
+            tenant_id=tenant_id,
+            content_type=content_type,
             **kwargs
         )
-        
+
+        result_payload = {
+            "job_id": job_id,
+            "status": "completed",
+            "document_type": document_type,
+            "raw_pointer": raw_pointer,
+            "items_indexed": stats.get("chunks_created", 0),
+            "collection_name": stats.get("collection_name"),
+            "indexed_to_vector": stats.get("indexed_to_vector", True),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+        result_pointer = self.storage_service.upload_json(
+            payload=result_payload,
+            filename=f"{job_id}.json",
+            tenant_id=tenant_id,
+            project_id=project_id,
+            bucket=self.processed_bucket,
+        )
+
         result = {
             "status": "completed",
-            "storage_path": storage_path,
-            **stats
+            "raw_pointer": raw_pointer,
+            "result_pointer": result_pointer,
+            **stats,
         }
-        
+
         return result
 
 def get_ingestion_orchestrator() -> IngestionOrchestrator:

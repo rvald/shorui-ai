@@ -8,6 +8,7 @@ This service handles:
 4. Maintaining a dedicated collection for HIPAA regulations
 """
 
+from __future__ import annotations
 import re
 from typing import Any
 

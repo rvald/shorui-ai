@@ -5,6 +5,8 @@ This module defines the interfaces for the main components of the compliance
 system, allowing for loose coupling and easier testing.
 """
 
+from __future__ import annotations
+
 from typing import Any, Protocol, runtime_checkable
 
 from shorui_core.domain.hipaa_schemas import (

@@ -14,6 +14,7 @@ Usage:
     result = pipeline.run(PipelineContext(raw_content=doc_bytes))
 """
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 

@@ -5,6 +5,8 @@ This module provides a singleton Qdrant client that can be shared
 across all services. It supports both local and cloud Qdrant deployments.
 """
 
+from __future__ import annotations
+
 from loguru import logger
 from qdrant_client import QdrantClient
 from qdrant_client.http.exceptions import UnexpectedResponse

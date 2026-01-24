@@ -41,7 +41,7 @@ def track_job_ledger(content_arg: str):
             if not all([job_id, project_id, filename]):
                  # If we can't find core tracking info, warn and run untracked (?) 
                  # or fail hard. Fail hard is safer for a tracked system.
-                 logger.error(f"Missing required args for ledger tracking: job_id={job_id}, project_id={project_id}, filename={filename}")
+                 logger.error(f"Missing required args for ledger tracking: job_id={job_id}, project_id={project_id}")
                  # We still run the function, assuming it might handle itself or fail.
                  # But we can't track it.
                  return func(self, *args, **kwargs)

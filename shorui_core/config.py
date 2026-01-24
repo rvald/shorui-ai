@@ -8,6 +8,8 @@ Uses defensive programming - raises errors early if required values are missing.
 
 from __future__ import annotations
 
+from __future__ import annotations
+
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -38,7 +40,7 @@ class Settings(BaseSettings):
     # Qdrant Configuration
     USE_QDRANT_CLOUD: bool = False
     QDRANT_DATABASE_HOST: str = "localhost"
-    QDRANT_DATABASE_PORT: int = 6335
+    QDRANT_DATABASE_PORT: int = 6333
     QDRANT_CLOUD_URL: str = ""
     QDRANT_APIKEY: str | None = None
 
@@ -77,6 +79,9 @@ class Settings(BaseSettings):
 
     # Temporary directory
     TEMP_DIR: str = "tmp"
+
+    # Ingestion retention
+    RAW_UPLOAD_TTL_DAYS: int = 30
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

@@ -26,12 +26,12 @@ class TestQdrantDatabaseConnector:
         ):
             mock_settings.USE_QDRANT_CLOUD = False
             mock_settings.QDRANT_DATABASE_HOST = "localhost"
-            mock_settings.QDRANT_DATABASE_PORT = 6334
+            mock_settings.QDRANT_DATABASE_PORT = 6333
             mock_client_cls.return_value = mock_qdrant_client
 
             client = QdrantDatabaseConnector.get_instance()
 
-            mock_client_cls.assert_called_once_with(host="localhost", port=6334)
+            mock_client_cls.assert_called_once_with(host="localhost", port=6333)
             assert client is mock_qdrant_client
 
     def test_creates_cloud_client_when_using_cloud(self, mock_qdrant_client):
@@ -70,7 +70,7 @@ class TestQdrantDatabaseConnector:
         ):
             mock_settings.USE_QDRANT_CLOUD = False
             mock_settings.QDRANT_DATABASE_HOST = "localhost"
-            mock_settings.QDRANT_DATABASE_PORT = 6334
+            mock_settings.QDRANT_DATABASE_PORT = 6333
             mock_client_cls.return_value = mock_qdrant_client
 
             client1 = QdrantDatabaseConnector.get_instance()
@@ -96,7 +96,7 @@ class TestGetConnectionFunction:
         ):
             mock_settings.USE_QDRANT_CLOUD = False
             mock_settings.QDRANT_DATABASE_HOST = "localhost"
-            mock_settings.QDRANT_DATABASE_PORT = 6334
+            mock_settings.QDRANT_DATABASE_PORT = 6333
             mock_client_cls.return_value = mock_qdrant_client
 
             client = QdrantDatabaseConnector.get_instance()

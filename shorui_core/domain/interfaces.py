@@ -9,6 +9,8 @@ for all ingestion services. These protocols enable:
 - Clear service contracts
 """
 
+from __future__ import annotations
+
 from typing import Any, Protocol, runtime_checkable
 
 

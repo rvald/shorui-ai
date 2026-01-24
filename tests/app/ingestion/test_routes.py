@@ -128,15 +128,25 @@ def test_client():
 
 @pytest.fixture
 def mock_services():
-    """Mock all services to avoid actual processing during tests.
+    """Mock services to avoid external dependencies (Celery, storage, DB)."""
+    mock_storage = MagicMock()
+    mock_storage.raw_bucket = "raw"
+    mock_storage.upload.return_value = "raw/mock/path"
 
-    Since routes now use Celery, we mock the task's delay method.
-    """
-    with patch("app.ingestion.routes.documents.process_document") as mock_task:
-        # Make task.delay() return a mock AsyncResult
+    mock_ledger = MagicMock()
+    mock_ledger.compute_content_hash.return_value = "hash"
+    mock_ledger.build_idempotency_key.return_value = "idem"
+    mock_ledger.check_idempotency.return_value = None
+    mock_ledger.create_job.return_value = "job-1"
+    mock_ledger.register_artifact.return_value = "artifact-1"
+
+    with (
+        patch("app.ingestion.routes.documents.process_document") as mock_task,
+        patch("app.ingestion.routes.documents.get_storage_service", return_value=mock_storage),
+        patch("app.ingestion.routes.documents.JobLedgerService", return_value=mock_ledger),
+    ):
         mock_task.delay.return_value = MagicMock(id="mock-task-id")
-
-        yield {"task": mock_task}
+        yield {"task": mock_task, "storage": mock_storage, "ledger": mock_ledger}
 
 
 @pytest.fixture

@@ -53,6 +53,7 @@ graph TD
 | **Agents** | `agents/` | [agents.md](./agents.md) | Autonomous ReAct agent handling user interaction and reasoning. |
 | **Compliance** | `app/compliance/` | [compliance.md](./compliance.md) | HIPAA validation, PHI detection (Presidio), and audit logging. |
 | **Ingestion** | `app/ingestion/` | [ingestion.md](./ingestion.md) | Document uploading, chunking, embedding, and storage. |
+| **Ingestion (Impl)** | `app/ingestion/` | [pointer_based_ingestion_impl.md](./pointer_based_ingestion_impl.md) | Pointer-based ingestion architecture implementation. |
 | **RAG** | `app/rag/` | [rag.md](./rag.md) | Retrieval Augmented Generation (Hybrid Search + Graph Reasoning). |
 | **Workers** | `app/workers/` | [workers.md](./workers.md) | Async background processing (Celery) for long-running tasks. |
 | **Core** | `shorui_core/` | [shorui_core.md](./shorui_core.md) | Shared infrastructure, protocols, configuration, and exceptions. |

@@ -63,12 +63,14 @@ class TestProcessDocumentTask:
         from app.workers.tasks import process_document
 
         # Should not raise when called with all params
-        result = process_document(
+        result = process_document.run(
             job_id="test-job-123",
-            file_content=b"test content",
+            tenant_id="tenant-1",
+            project_id="test-project",
+            raw_pointer="raw/path",
             filename="test.txt",
             content_type="text/plain",
-            project_id="test-project",
+            document_type="general",
             index_to_vector=True,
             index_to_graph=False,
         )
@@ -79,12 +81,14 @@ class TestProcessDocumentTask:
         """Task should return a result dict with job info."""
         from app.workers.tasks import process_document
 
-        result = process_document(
+        result = process_document.run(
             job_id="test-job-456",
-            file_content=b"test text content",
+            tenant_id="tenant-1",
+            project_id="project-1",
+            raw_pointer="raw/path",
             filename="doc.txt",
             content_type="text/plain",
-            project_id="project-1",
+            document_type="general",
             index_to_vector=True,
             index_to_graph=False,
         )
@@ -97,29 +101,32 @@ class TestProcessDocumentTask:
         """Task should update job status in PostgreSQL ledger."""
         from app.workers.tasks import process_document
 
-        process_document(
+        process_document.run(
             job_id="test-job-789",
-            file_content=b"test content",
+            tenant_id="tenant-1",
+            project_id="project-1",
+            raw_pointer="raw/path",
             filename="doc.txt",
             content_type="text/plain",
-            project_id="project-1",
+            document_type="general",
             index_to_vector=True,
             index_to_graph=False,
         )
 
         # Verify ledger was called
-        mock_all_services["ledger"].create_job.assert_called()
+        mock_all_services["ledger"].update_status.assert_called()
 
     def test_task_processes_general_document(self, mock_all_services):
         """Task should successfully process general documents."""
         from app.workers.tasks import process_document
 
-        result = process_document(
+        result = process_document.run(
             job_id="test-general",
-            file_content=b"test content",
+            tenant_id="tenant-1",
+            project_id="project-1",
+            raw_pointer="raw/path",
             filename="doc.txt",
             content_type="text/plain",
-            project_id="project-1",
             document_type="general",
             index_to_vector=True,
         )
@@ -132,13 +139,20 @@ class TestProcessDocumentTask:
         """Task should successfully process HIPAA regulation documents."""
         from app.workers.tasks import process_document
 
-        result = process_document(
+        # Override mock return for HIPAA path
+        mock_all_services["orchestrator"].process.return_value["document_type"] = "hipaa_regulation"
+        mock_all_services["ledger"].check_idempotency.return_value = None
+
+        result = process_document.run(
             job_id="test-hipaa",
-            file_content=b"HIPAA regulation text",
+            tenant_id="tenant-1",
+            project_id="hipaa",
+            raw_pointer="raw/path",
             filename="regulation.txt",
             content_type="text/plain",
-            project_id="hipaa",
             document_type="hipaa_regulation",
+            index_to_vector=True,
+            index_to_graph=False,
             source="45 CFR 164.514",
         )
 
@@ -167,18 +181,26 @@ class TestIdempotency:
         """Should skip processing if document was already completed."""
         from app.workers.tasks import process_document
 
-        # Configure mock to indicate document already processed
         mock_all_services["ledger"].check_idempotency.return_value = {
             "job_id": "existing-job",
             "status": "completed",
+            "result_pointer": "processed/results/existing.json",
         }
 
-        result = process_document(
+        result = process_document.run(
             job_id="new-job",
-            file_content=b"test content",
+            tenant_id="tenant-1",
+            project_id="project-1",
+            raw_pointer="raw/path",
             filename="doc.txt",
             content_type="text/plain",
-            project_id="project-1",
+            document_type="general",
+            index_to_vector=True,
+            index_to_graph=False,
+            source=None,
+            title=None,
+            category=None,
+            idempotency_key="idem-key",
         )
 
         assert result["status"] == "skipped"
@@ -192,76 +214,25 @@ class TestIdempotency:
 def mock_all_services():
     """Mock all services used by the Celery task."""
     with (
-        patch("app.workers.tasks.StorageService") as mock_storage_cls,
         patch("app.workers.tasks.JobLedgerService") as mock_ledger_cls,
-        patch(
-            "app.ingestion.services.document_ingestion_service.ChunkingService"
-        ) as mock_chunk_cls,
-        patch(
-            "app.ingestion.services.document_ingestion_service.EmbeddingService"
-        ) as mock_embed_cls,
-        patch(
-            "app.ingestion.services.document_ingestion_service.IndexingService"
-        ) as mock_index_cls,
-        patch(
-            "app.compliance.services.hipaa_regulation_service.ChunkingService"
-        ) as mock_hipaa_chunk_cls,
-        patch(
-            "app.compliance.services.hipaa_regulation_service.EmbeddingService"
-        ) as mock_hipaa_embed_cls,
-        patch(
-            "app.compliance.services.hipaa_regulation_service.IndexingService"
-        ) as mock_hipaa_index_cls,
+        patch("app.workers.tasks.get_ingestion_orchestrator") as mock_orch_factory,
     ):
-        # Create mock instances
-        mock_storage = MagicMock()
-        mock_ledger = MagicMock()
-        mock_chunking = MagicMock()
-        mock_embedding = MagicMock()
-        mock_indexing = MagicMock()
-
-        # Configure classes to return mocks
-        mock_storage_cls.return_value = mock_storage
-        mock_ledger_cls.return_value = mock_ledger
-        mock_chunk_cls.return_value = mock_chunking
-        mock_embed_cls.return_value = mock_embedding
-        mock_index_cls.return_value = mock_indexing
-
-        # HIPAA service mocks
-        mock_hipaa_chunk_cls.return_value = mock_chunking
-        mock_hipaa_embed_cls.return_value = mock_embedding
-        mock_hipaa_index_cls.return_value = mock_indexing
-
-        # Default behaviors
-        mock_storage.upload.return_value = "raw/test/file.txt"
-        mock_ledger.check_idempotency.return_value = None
-        mock_ledger.compute_content_hash.return_value = "abc123hash"
-        mock_chunking.chunk.return_value = ["chunk1"]
-        mock_chunking.chunk_with_metadata.return_value = [{"text": "chunk1", "index": 0}]
-        mock_embedding.embed.return_value = [[0.1] * 1024]
-        mock_indexing.index.return_value = True
-
-        # Create service mocks for delegation assertions
-        mock_doc_ingestion = MagicMock()
-        mock_doc_ingestion.ingest_document.return_value = {
+        mock_orchestrator = MagicMock()
+        mock_orchestrator.process.return_value = {
+            "status": "completed",
+            "document_type": "general",
             "chunks_created": 1,
             "collection_name": "project_test",
-            "success": True,
+            "result_pointer": "processed/results/job.json",
+            "raw_pointer": "raw/path",
         }
+        mock_orch_factory.return_value = mock_orchestrator
 
-        mock_hipaa_service = MagicMock()
-        mock_hipaa_service.ingest_regulation.return_value = {
-            "chunks_created": 1,
-            "sections_found": [],
-            "success": True,
-        }
+        mock_ledger = MagicMock()
+        mock_ledger.check_idempotency.return_value = None
+        mock_ledger_cls.return_value = mock_ledger
 
         yield {
-            "storage": mock_storage,
             "ledger": mock_ledger,
-            "chunking": mock_chunking,
-            "embedding": mock_embedding,
-            "indexing": mock_indexing,
-            "doc_ingestion": mock_doc_ingestion,
-            "hipaa_service": mock_hipaa_service,
+            "orchestrator": mock_orchestrator,
         }

@@ -3,6 +3,8 @@ Centralized logging configuration for shorui-ai.
 Initializes loguru and intercepts standard library logging.
 """
 
+from __future__ import annotations
+
 import logging
 import sys
 from loguru import logger

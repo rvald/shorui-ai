@@ -5,6 +5,8 @@ This module provides a singleton Neo4j driver that can be shared
 across all services. It uses the unified settings for connection parameters.
 """
 
+from __future__ import annotations
+
 from loguru import logger
 from neo4j import Driver, GraphDatabase
 
