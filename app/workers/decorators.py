@@ -60,7 +60,12 @@ def track_job_ledger(content_arg: str):
                 content_hash = ledger_service.compute_content_hash(content_bytes)
 
                 # 2. Idempotency Check
-                existing = ledger_service.check_idempotency(project_id, filename, content_hash)
+                existing = ledger_service.check_idempotency(
+                    idempotency_key=content_hash,
+                    job_type="compliance_analysis",
+                    tenant_id="default",  # TODO: Pass tenant_id through task args
+                    project_id=project_id,
+                )
                 if existing and existing.get("status") == "completed":
                     logger.info(f"[{job_id}] Document already processed (job: {existing['job_id']})")
                     return {
@@ -76,11 +81,13 @@ def track_job_ledger(content_arg: str):
                 # We will set a temporary storage path.
                 try:
                     ledger_service.create_job(
+                        tenant_id="default",  # TODO: Pass tenant_id through task args
                         project_id=project_id,
-                        filename=filename,
-                        storage_path=f"pending:{job_id}", 
-                        content_hash=content_hash,
+                        job_type="compliance_analysis",
                         job_id=job_id,
+                        idempotency_key=content_hash,
+                        document_type=filename,
+                        raw_pointer=f"pending:{job_id}",
                     )
                     ledger_service.update_status(job_id, "processing", progress=10)
                 except Exception as e:
@@ -93,8 +100,18 @@ def track_job_ledger(content_arg: str):
                 # Orchestrator might return stats like 'items_indexed' or 'phi_detected'
                 items_indexed = result.get("chunks_created") or result.get("phi_detected") or 0
                 
+                # Store transcript_id and report_id in result_artifacts for retrieval
+                result_artifacts = {
+                    "transcript_id": result.get("transcript_id"),
+                    "report_id": result.get("report_id"),
+                }
+                
                 try:
-                    ledger_service.complete_job(job_id, items_indexed=items_indexed)
+                    ledger_service.complete_job(
+                        job_id, 
+                        items_indexed=items_indexed,
+                        result_artifacts=[result_artifacts],
+                    )
                 except Exception as e:
                     logger.warning(f"[{job_id}] Ledger complete failed: {e}")
 

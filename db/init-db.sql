@@ -74,11 +74,55 @@ CREATE INDEX IF NOT EXISTS idx_dlq_failed_at ON dead_letter_queue(failed_at DESC
 CREATE INDEX IF NOT EXISTS idx_dlq_unreviewed ON dead_letter_queue(reviewed) WHERE NOT reviewed;
 
 -- =============================================================================
+-- Clinical Transcripts table (metadata + pointer to encrypted storage)
+-- No PHI stored here - raw text is in MinIO via storage_pointer
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS transcripts (
+    transcript_id UUID PRIMARY KEY,
+    tenant_id VARCHAR(255) NOT NULL,
+    project_id VARCHAR(255) NOT NULL,
+    filename VARCHAR(512),
+    storage_pointer TEXT NOT NULL,
+    byte_size BIGINT,
+    text_length INT,
+    file_hash VARCHAR(64),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    created_by_job_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS idx_transcripts_tenant_project ON transcripts(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_transcripts_job ON transcripts(created_by_job_id);
+
+-- =============================================================================
+-- Compliance Reports table (JSONB report data - no raw PHI)
+-- Contains risk levels, counts, findings, recommendations
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS compliance_reports (
+    report_id UUID PRIMARY KEY,
+    tenant_id VARCHAR(255) NOT NULL,
+    project_id VARCHAR(255) NOT NULL,
+    transcript_id UUID NOT NULL REFERENCES transcripts(transcript_id),
+    overall_risk_level VARCHAR(20),
+    total_phi_detected INT DEFAULT 0,
+    total_violations INT DEFAULT 0,
+    report_json JSONB,
+    schema_version VARCHAR(50) DEFAULT '1.0',
+    generated_at TIMESTAMPTZ DEFAULT NOW(),
+    created_by_job_id UUID
+);
+
+CREATE INDEX IF NOT EXISTS idx_compliance_reports_tenant_project ON compliance_reports(tenant_id, project_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_reports_transcript ON compliance_reports(transcript_id);
+CREATE INDEX IF NOT EXISTS idx_compliance_reports_job ON compliance_reports(created_by_job_id);
+
+-- =============================================================================
 -- HIPAA Audit Events table (append-only for compliance)
 -- =============================================================================
 CREATE TABLE IF NOT EXISTS audit_events (
     id UUID PRIMARY KEY,
     sequence_number SERIAL,
+    tenant_id VARCHAR(255) NOT NULL,
+    project_id VARCHAR(255) NOT NULL,
     event_type VARCHAR(50) NOT NULL,
     description TEXT NOT NULL,
     user_id VARCHAR(100),
@@ -92,7 +136,9 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 
 -- Create indexes for audit queries
+CREATE INDEX IF NOT EXISTS idx_audit_events_tenant_project ON audit_events(tenant_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp ON audit_events(timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_events_event_type ON audit_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_audit_events_resource ON audit_events(resource_type, resource_id);
 CREATE INDEX IF NOT EXISTS idx_audit_events_user ON audit_events(user_id);
+

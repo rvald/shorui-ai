@@ -219,6 +219,10 @@ class AuditEventType(str, Enum):
     COMPLIANCE_DECISION = "COMPLIANCE_DECISION"
     REPORT_GENERATED = "REPORT_GENERATED"
     USER_LOGIN = "USER_LOGIN"
+    # Required events per component_audit_ledger.md
+    TRANSCRIPT_UPLOADED = "TRANSCRIPT_UPLOADED"
+    DOCUMENT_INGESTED = "DOCUMENT_INGESTED"
+    COMPLIANCE_REPORT_GENERATED = "COMPLIANCE_REPORT_GENERATED"
 
 
 class AuditEvent(BaseModel):
@@ -231,6 +235,10 @@ class AuditEvent(BaseModel):
     """
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+
+    # Tenant scoping (required per component_audit_ledger.md)
+    tenant_id: str
+    project_id: str
 
     # What happened
     event_type: AuditEventType
@@ -247,7 +255,7 @@ class AuditEvent(BaseModel):
     # When
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
-    # Additional context
+    # Additional context (PHI-safe keys only)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

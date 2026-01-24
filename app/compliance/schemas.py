@@ -71,6 +71,8 @@ class TranscriptJobStatus(BaseModel):
 
     job_id: str
     status: str  # pending, processing, completed, failed
+    transcript_id: str | None = None
+    report_id: str | None = None
     result: TranscriptUploadResponse | None = None
     error: str | None = None
 

@@ -24,6 +24,7 @@ from app.compliance.schemas import (
     TranscriptUploadResponse,
 )
 from app.compliance.services.hipaa_regulation_service import HIPAARegulationService
+from app.compliance.services.report_repository import get_report_repository
 from app.ingestion.services.job_ledger import JobLedgerService
 from app.workers.transcript_tasks import analyze_clinical_transcript
 from shorui_core.domain.hipaa_schemas import AuditEventType
@@ -121,13 +122,23 @@ async def get_transcript_job_status(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    # Extract transcript_id and report_id from result_artifacts if available
+    transcript_id = None
+    report_id = None
+    result_artifacts = job.get("result_artifacts")
+    if result_artifacts:
+        # Handle both list format (from decorator) and dict format
+        if isinstance(result_artifacts, list) and len(result_artifacts) > 0:
+            result_artifacts = result_artifacts[0]
+        if isinstance(result_artifacts, dict):
+            transcript_id = result_artifacts.get("transcript_id")
+            report_id = result_artifacts.get("report_id")
+
     result = None
     if job["status"] == "completed":
-        # In a real app, we'd fetch the full result from storage/cache
-        # For now, we return a summary based on ledger info
         result = TranscriptUploadResponse(
-            transcript_id="unknown",  # We'd need to store this in ledger or look up
-            filename=job["filename"],
+            transcript_id=transcript_id or "unknown",
+            filename=job.get("document_type") or "transcript",
             phi_detected=job.get("items_indexed", 0),
             processing_time_ms=0,
             message="Job completed",
@@ -136,6 +147,8 @@ async def get_transcript_job_status(job_id: str):
     return TranscriptJobStatus(
         job_id=job_id,
         status=job["status"],
+        transcript_id=transcript_id,
+        report_id=report_id,
         result=result,
         error=job.get("error"),
     )
@@ -147,10 +160,40 @@ async def get_transcript_job_status(job_id: str):
     summary="Get compliance report",
 )
 async def get_compliance_report_endpoint(transcript_id: str):
-    """Get the generated compliance report for a transcript."""
-    # In a real app, retrieve from database
-    # For now, mock response since storage implementation is pending
-    raise HTTPException(status_code=501, detail="Report retrieval not yet implemented")
+    """
+    Get the generated compliance report for a transcript.
+    
+    Returns the persisted compliance report with risk assessment,
+    PHI counts, findings, and recommendations. Does not include raw PHI.
+    """
+    repo = get_report_repository()
+    report = repo.get_by_transcript_id(transcript_id)
+
+    if not report:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No compliance report found for transcript {transcript_id}"
+        )
+
+    # Build response from stored data
+    report_json = report.get("report_json", {})
+    sections = report_json.get("sections", [])
+    
+    generated_at = report.get("generated_at")
+    if hasattr(generated_at, "isoformat"):
+        generated_at = generated_at.isoformat()
+    else:
+        generated_at = str(generated_at) if generated_at else ""
+
+    return ComplianceReportResponse(
+        report_id=report["report_id"],
+        transcript_id=report["transcript_id"],
+        overall_risk_level=report["overall_risk_level"] or "UNKNOWN",
+        total_phi_detected=report["total_phi_detected"] or 0,
+        total_violations=report["total_violations"] or 0,
+        sections=sections,
+        generated_at=generated_at,
+    )
 
 
 # ==============================================================================

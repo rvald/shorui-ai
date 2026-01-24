@@ -204,15 +204,17 @@ class HIPAAGraphIngestionService:
                                 stats["relationships_created"] += 1
 
         # Log audit event
+        # Note: tenant_id is currently derived from project context
+        # TODO: Pass actual tenant_id when auth is implemented
         await self._log_audit_event(
             event_type=AuditEventType.PHI_DETECTED,
             description=f"Ingested transcript with {len(extraction_result.phi_spans)} PHI spans",
+            tenant_id="default",  # Will be derived from auth context
+            project_id=project_id,
             resource_type="Transcript",
             resource_id=transcript_id,
             metadata={
-                "filename": filename,
                 "phi_count": len(extraction_result.phi_spans),
-                "project_id": project_id,
             },
         )
 
@@ -283,9 +285,13 @@ class HIPAAGraphIngestionService:
             data = json.loads(content.decode("utf-8"))
 
             # Log access (HIPAA audit requirement)
+            # Note: We don't have tenant/project context here, need to extract from pointer
+            # TODO: Pass tenant/project context through to this method
             await self._log_audit_event(
                 event_type=AuditEventType.PHI_ACCESSED,
                 description="Retrieved PHI from storage",
+                tenant_id="default",  # Will be derived from auth context
+                project_id="unknown",  # TODO: Extract from storage_pointer or pass as param
                 resource_type="PHI",
                 resource_id=storage_pointer,
             )
@@ -299,6 +305,8 @@ class HIPAAGraphIngestionService:
         self,
         event_type: AuditEventType,
         description: str,
+        tenant_id: str,
+        project_id: str,
         resource_type: str | None = None,
         resource_id: str | None = None,
         metadata: dict[str, Any] | None = None,
@@ -312,6 +320,8 @@ class HIPAAGraphIngestionService:
             await self._audit_service.log(
                 event_type=event_type,
                 description=description,
+                tenant_id=tenant_id,
+                project_id=project_id,
                 resource_type=resource_type,
                 resource_id=resource_id,
                 metadata=metadata or {},
