@@ -80,8 +80,12 @@ class Settings(BaseSettings):
     # Temporary directory
     TEMP_DIR: str = "tmp"
 
+    # Auth settings
+    REQUIRE_AUTH: bool = False  # Set True in production
+
     # Ingestion retention
     RAW_UPLOAD_TTL_DAYS: int = 30
+
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

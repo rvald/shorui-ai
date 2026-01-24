@@ -142,3 +142,35 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_event_type ON audit_events(event_typ
 CREATE INDEX IF NOT EXISTS idx_audit_events_resource ON audit_events(resource_type, resource_id);
 CREATE INDEX IF NOT EXISTS idx_audit_events_user ON audit_events(user_id);
 
+-- =============================================================================
+-- Tenants table (organizations)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS tenants (
+    tenant_id VARCHAR(255) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+-- Default tenant for development/migration
+INSERT INTO tenants (tenant_id, name) VALUES ('default', 'Default Tenant')
+ON CONFLICT (tenant_id) DO NOTHING;
+
+-- =============================================================================
+-- API Keys table (stores hashed keys for authentication)
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS api_keys (
+    key_id UUID PRIMARY KEY,
+    key_hash VARCHAR(64) NOT NULL UNIQUE,   -- SHA-256 of the raw key
+    key_prefix VARCHAR(12) NOT NULL,         -- First 12 chars for identification
+    tenant_id VARCHAR(255) NOT NULL REFERENCES tenants(tenant_id),
+    name VARCHAR(255),                        -- Human-readable identifier
+    scopes TEXT[] NOT NULL,                   -- Array of permission scopes
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ,                   -- Optional expiration
+    last_used_at TIMESTAMPTZ,
+    is_active BOOLEAN DEFAULT TRUE
+);
+
+CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_tenant ON api_keys(tenant_id);

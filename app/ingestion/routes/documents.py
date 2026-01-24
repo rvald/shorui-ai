@@ -10,14 +10,15 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from loguru import logger
 
 from app.ingestion.schemas import JobStatus, UploadResponse
 from app.ingestion.services.job_ledger import JobLedgerService
 from app.ingestion.services.storage import get_storage_backend
-from app.ingestion.services.tenant import resolve_tenant_from_project
 from app.workers.tasks import process_document
+from shorui_core.auth.dependencies import require_ingest_write
+from shorui_core.domain.auth import AuthContext
 
 router = APIRouter()
 _storage_service = None
@@ -51,6 +52,8 @@ async def upload_document(
     source: str | None = Form(default=None),  # e.g., "45 CFR 164.514"
     title: str | None = Form(default=None),
     category: str | None = Form(default=None),  # privacy_rule, security_rule, etc.
+    # Auth dependency - tenant_id derived from API key
+    auth: AuthContext = Depends(require_ingest_write),
 ):
     """
     Upload a document for processing.
@@ -67,11 +70,13 @@ async def upload_document(
         source: For regulations - source identifier (e.g., "45 CFR 164.514").
         title: For regulations - human-readable title.
         category: For regulations - category (privacy_rule, security_rule, etc.).
+        auth: Auth context from API key (injected by middleware).
 
     Returns:
         UploadResponse: Contains job_id for tracking.
     """
-    tenant_id = resolve_tenant_from_project(project_id)
+    # Derive tenant_id from authenticated API key, not client input
+    tenant_id = auth.tenant_id
     request_id = str(uuid.uuid4())
     ledger = JobLedgerService()
 

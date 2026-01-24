@@ -7,11 +7,13 @@ This module provides endpoints for RAG (Retrieval-Augmented Generation):
 """
 
 from __future__ import annotations
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
 
 from app.rag.factory import get_generator, get_retriever
+from shorui_core.auth.dependencies import require_rag_read
+from shorui_core.domain.auth import AuthContext
 
 router = APIRouter()
 
@@ -74,7 +76,10 @@ def rag_health():
 
 
 @router.post("/query", response_model=QueryResponse)
-async def rag_query(request: QueryRequest):
+async def rag_query(
+    request: QueryRequest,
+    auth: AuthContext = Depends(require_rag_read),
+):
     """
     Full RAG query: retrieve context and generate answer.
 
@@ -153,6 +158,7 @@ async def rag_search(
     query: str = Query(..., description="Search query"),
     project_id: str = Query(..., description="Project identifier"),
     k: int = Query(default=10, ge=1, le=50, description="Number of results"),
+    auth: AuthContext = Depends(require_rag_read),
 ):
     """
     Search-only: retrieve documents without LLM generation.

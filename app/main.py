@@ -15,6 +15,7 @@ from app.ingestion.routes import router as ingestion_router
 from app.rag.routes import router as rag_router
 from app.agent.routes import router as agent_router
 from app.compliance.routes import router as compliance_router
+from shorui_core.auth.middleware import AuthMiddleware
 from shorui_core.config import settings
 from shorui_core.logging import setup_logging
 
@@ -41,6 +42,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Auth middleware (set REQUIRE_AUTH=true in production)
+app.add_middleware(AuthMiddleware, require_auth=settings.REQUIRE_AUTH)
+
 
 # Mount the ingestion router under /ingest prefix
 app.include_router(ingestion_router, prefix="/ingest", tags=["Ingestion"])

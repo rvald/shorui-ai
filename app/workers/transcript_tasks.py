@@ -27,6 +27,7 @@ def analyze_clinical_transcript(
     text: str,
     filename: str,
     project_id: str,
+    tenant_id: str = "default",
 ) -> dict:
     """
     Celery task to analyze a clinical transcript for HIPAA compliance.
@@ -46,6 +47,7 @@ def analyze_clinical_transcript(
             text=text,
             filename=filename,
             project_id=project_id,
+            tenant_id=tenant_id,
         )
     )
 
@@ -54,6 +56,7 @@ async def _analyze_transcript_async(
     text: str,
     filename: str,
     project_id: str,
+    tenant_id: str = "default",
 ) -> dict:
     """Helper for synchronous API calls."""
     orchestrator = get_compliance_orchestrator()
@@ -62,4 +65,6 @@ async def _analyze_transcript_async(
         text=text,
         filename=filename,
         project_id=project_id,
+        tenant_id=tenant_id,
     )
+

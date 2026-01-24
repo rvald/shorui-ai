@@ -52,10 +52,14 @@ class AsyncAgentService:
             self._workflow = get_workflow()
         return self._workflow
     
-    async def create_session(self) -> str:
-        """Create new session ID (state persisted via Redis checkpointer)."""
+    async def create_session(self, tenant_id: str | None = None) -> str:
+        """Create new session ID (state persisted via Redis checkpointer).
+        
+        Args:
+            tenant_id: Optional tenant ID to bind session to (for future use).
+        """
         session_id = str(uuid.uuid4())
-        logger.info(f"Created agent session: {session_id}")
+        logger.info(f"Created agent session: {session_id} (tenant={tenant_id or 'default'})")
         return session_id
     
     async def send_message(

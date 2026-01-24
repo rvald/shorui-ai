@@ -6,13 +6,15 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 
 from app.agent.schemas import (
     CreateSessionResponse,
     AgentResponse,
     AgentStep,
 )
+from shorui_core.auth.dependencies import get_auth_context
+from shorui_core.domain.auth import AuthContext
 
 router = APIRouter(prefix="/agent", tags=["agent"])
 
@@ -36,10 +38,13 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @router.post("/sessions", response_model=CreateSessionResponse)
-async def create_session():
+async def create_session(
+    auth: AuthContext = Depends(get_auth_context),
+):
     """Create a new ephemeral agent session."""
     service = get_service()
-    session_id = await service.create_session()
+    # Pass tenant_id to bind session to tenant
+    session_id = await service.create_session(tenant_id=auth.tenant_id)
     
     return CreateSessionResponse(
         session_id=session_id,
@@ -53,6 +58,7 @@ async def send_message(
     message: str = Form(...),
     project_id: str = Form("default"),
     files: Optional[List[UploadFile]] = File(None),
+    auth: AuthContext = Depends(get_auth_context),
 ):
     """
     Send a message to an existing agent session.

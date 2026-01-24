@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from typing import Union
 
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from loguru import logger
 
 from app.compliance.factory import get_audit_logger
@@ -27,6 +27,12 @@ from app.compliance.services.hipaa_regulation_service import HIPAARegulationServ
 from app.compliance.services.report_repository import get_report_repository
 from app.ingestion.services.job_ledger import JobLedgerService
 from app.workers.transcript_tasks import analyze_clinical_transcript
+from shorui_core.auth.dependencies import (
+    get_auth_context,
+    require_audit_read,
+    require_compliance_read,
+)
+from shorui_core.domain.auth import AuthContext
 from shorui_core.domain.hipaa_schemas import AuditEventType
 
 router = APIRouter(tags=["compliance"])
@@ -47,6 +53,7 @@ async def upload_clinical_transcript(
     project_id: str = Query("default", description="Project ID"),
     background_tasks: BackgroundTasks = None,
     use_async: bool = Query(True, description="Process asynchronously via Celery"),
+    auth: AuthContext = Depends(require_compliance_read),
 ):
     """
     Upload a clinical transcript for HIPAA compliance analysis.
@@ -63,7 +70,8 @@ async def upload_clinical_transcript(
         content = await file.read()
         text = content.decode("utf-8")
         filename = file.filename or "unknown.txt"
-        # project_id from query param
+        # Derive tenant_id from authenticated API key
+        tenant_id = auth.tenant_id
         job_id = str(uuid.uuid4())
 
         logger.info(
@@ -77,6 +85,7 @@ async def upload_clinical_transcript(
                 text=text,
                 filename=filename,
                 project_id=project_id,
+                tenant_id=tenant_id,
             )
             return TranscriptJobResponse(
                 job_id=job_id,
@@ -89,7 +98,7 @@ async def upload_clinical_transcript(
             from app.workers.transcript_tasks import _analyze_transcript_async
 
             result = await _analyze_transcript_async(
-                job_id, text, filename, project_id
+                job_id, text, filename, project_id, tenant_id
             )
 
             if result.get("status") == "failed":
@@ -209,6 +218,7 @@ async def get_compliance_report_endpoint(transcript_id: str):
 async def query_audit_log(
     event_type: AuditEventType | None = None,
     limit: int = 100,
+    auth: AuthContext = Depends(require_audit_read),
 ):
     """
     Query the HIPAA audit trail.
@@ -216,7 +226,13 @@ async def query_audit_log(
     Returns a list of tamper-evident audit events handling PHI access/detection.
     """
     audit_logger = get_audit_logger()
-    events = await audit_logger.query_events(event_type=event_type, limit=limit)
+    # Query events scoped to authenticated tenant
+    events = await audit_logger.query_events(
+        tenant_id=auth.tenant_id,
+        project_id="default",  # TODO: Add project_id query parameter
+        event_type=event_type,
+        limit=limit,
+    )
 
     return AuditLogResponse(
         events=events,
