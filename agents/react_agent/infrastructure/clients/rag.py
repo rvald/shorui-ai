@@ -1,195 +1,120 @@
 """
-RAG Service HTTP Clients.
+RAG Service HTTP Client.
+
+Provides async client for RAG (Retrieval-Augmented Generation) operations
+using the ServiceHttpClient from shorui_core.runtime.
 """
+
 from __future__ import annotations
 
 import os
-from typing import Any, Optional
-import httpx
+from typing import Any
 
-from .base import ServiceStatus
+from shorui_core.runtime import RunContext, ServiceHttpClient, RetryPolicy
+
+from .base import ServiceStatus, default_context
 
 # Configuration
 RAG_BASE_URL = os.getenv("RAG_SERVICE_URL", "http://localhost:8082/rag")
 DEFAULT_TIMEOUT = 60.0
 
-DEFAULT_POOL_LIMITS = httpx.Limits(
-    max_connections=100,
-    max_keepalive_connections=20,
-    keepalive_expiry=30.0,
-)
+# Health checks should fail fast, no retry
+HEALTH_CHECK_POLICY = RetryPolicy(max_attempts=1, base_delay=0.0)
+
 
 class RAGClient:
-    """
-    Synchronous client for the RAG (Retrieval-Augmented Generation) Service.
-    """
-    
-    def __init__(self, base_url: str = RAG_BASE_URL, timeout: float = DEFAULT_TIMEOUT):
-        self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
-    
-    def search(
-        self,
-        query: str,
-        project_id: str,
-        k: int = 5,
-    ) -> dict[str, Any]:
-        """
-        RETRIEVAL ONLY: Semantic search over documents without LLM generation.
-        """
-        with httpx.Client(timeout=self.timeout) as client:
-            response = client.get(
-                f"{self.base_url}/search",
-                params={
-                    "query": query,
-                    "project_id": project_id,
-                    "k": k,
-                },
-            )
-            response.raise_for_status()
-            return response.json()
-    
-    def query(
-        self,
-        query: str,
-        project_id: str,
-        k: int = 5,
-        backend: str = "openai",
-    ) -> dict[str, Any]:
-        """
-        FULL RAG: Retrieve documents and generate an AI answer.
-        """
-        with httpx.Client(timeout=self.timeout) as client:
-            response = client.post(
-                f"{self.base_url}/query",
-                json={
-                    "query": query,
-                    "project_id": project_id,
-                    "k": k,
-                    "backend": backend,
-                },
-            )
-            response.raise_for_status()
-            return response.json()
-    
-    def health_check(self) -> ServiceStatus:
-        """Check if RAG service is healthy."""
-        try:
-            with httpx.Client(timeout=5.0) as client:
-                response = client.get(f"{self.base_url}/health")
-                response.raise_for_status()
-                return ServiceStatus(name="rag", healthy=True, message="OK")
-        except Exception as e:
-            return ServiceStatus(name="rag", healthy=False, message=str(e))
+    """Async client for the RAG (Retrieval-Augmented Generation) Service.
 
+    Uses ServiceHttpClient for connection pooling, automatic header injection,
+    and retry on transient failures.
 
-class RegulationRetriever:
+    Example:
+        async with RAGClient() as client:
+            result = await client.query("What is HIPAA?", "hipaa_docs")
     """
-    Client for retrieving HIPAA regulations from the RAG service.
-    """
-    
-    def __init__(self, rag_client: Optional[RAGClient] = None):
-        self._client = rag_client or RAGClient()
-    
-    def search_regulations(
-        self,
-        query: str,
-        k: int = 5,
-        project_id: str = "hipaa_regulations",
-    ) -> list[dict[str, Any]]:
-        """
-        Search for relevant HIPAA regulations.
-        """
-        result = self._client.search(
-            query=query,
-            project_id=project_id,
-            k=k,
-        )
-        return result.get("results", [])
-    
-    def get_regulation_context(
-        self,
-        query: str,
-        k: int = 3,
-        project_id: str = "hipaa_regulations",
-    ) -> str:
-        """
-        Get formatted regulation context for RAG.
-        """
-        results = self.search_regulations(query, k, project_id)
-        
-        if not results:
-            return "No relevant HIPAA regulations found."
-        
-        sections = []
-        for i, result in enumerate(results, 1):
-            content = result.get("content", "")
-            filename = result.get("filename", "Unknown")
-            sections.append(f"[{i}] {filename}:\n{content}")
-        
-        return "\n\n---\n\n".join(sections)
 
-
-class AsyncRAGClient:
-    """
-    Async client for the RAG Service with connection pooling.
-    """
-    
     def __init__(
         self,
         base_url: str = RAG_BASE_URL,
         timeout: float = DEFAULT_TIMEOUT,
-        limits: Optional[httpx.Limits] = None,
     ):
-        self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
-        self._client = httpx.AsyncClient(
+        """Initialize the RAG client.
+
+        Args:
+            base_url: Base URL of the RAG service.
+            timeout: Request timeout in seconds.
+        """
+        self._http = ServiceHttpClient(
+            base_url=base_url,
             timeout=timeout,
-            limits=limits or DEFAULT_POOL_LIMITS,
         )
-    
+
     async def close(self) -> None:
         """Close the HTTP client and release connections."""
-        await self._client.aclose()
-    
-    async def __aenter__(self) -> "AsyncRAGClient":
+        await self._http.close()
+
+    async def __aenter__(self) -> "RAGClient":
+        """Enter async context manager."""
         return self
-    
-    async def __aexit__(self, *args) -> None:
+
+    async def __aexit__(self, *args: Any) -> None:
+        """Exit async context manager."""
         await self.close()
-    
+
     async def search(
         self,
         query: str,
         project_id: str,
         k: int = 5,
+        context: RunContext | None = None,
     ) -> dict[str, Any]:
+        """Semantic search over documents without LLM generation.
+
+        Args:
+            query: Search query text.
+            project_id: Project to search within.
+            k: Number of results to return.
+            context: Optional RunContext for correlation ID propagation.
+
+        Returns:
+            Search results with matched documents.
         """
-        Semantic search over documents asynchronously.
-        """
-        response = await self._client.get(
-            f"{self.base_url}/search",
+        ctx = context or default_context()
+        response = await self._http.get(
+            "/search",
+            ctx,
             params={
                 "query": query,
                 "project_id": project_id,
                 "k": k,
             },
         )
-        response.raise_for_status()
         return response.json()
-    
+
     async def query(
         self,
         query: str,
         project_id: str,
         k: int = 5,
         backend: str = "openai",
+        context: RunContext | None = None,
     ) -> dict[str, Any]:
+        """Full RAG: retrieve documents and generate an AI answer.
+
+        Args:
+            query: Question to answer.
+            project_id: Project containing documents.
+            k: Number of documents to retrieve.
+            backend: LLM backend to use ("openai" or "runpod").
+            context: Optional RunContext for correlation ID propagation.
+
+        Returns:
+            Generated answer with source citations.
         """
-        Full RAG query - retrieve + generate answer asynchronously.
-        """
-        response = await self._client.post(
-            f"{self.base_url}/query",
+        ctx = context or default_context()
+        response = await self._http.post(
+            "/query",
+            ctx,
             json={
                 "query": query,
                 "project_id": project_id,
@@ -197,76 +122,116 @@ class AsyncRAGClient:
                 "backend": backend,
             },
         )
-        response.raise_for_status()
         return response.json()
-    
+
     async def health_check(self) -> ServiceStatus:
-        """Check if RAG service is healthy asynchronously."""
+        """Check if RAG service is healthy.
+
+        Returns:
+            ServiceStatus indicating health state.
+        """
         try:
-            response = await self._client.get(
-                f"{self.base_url}/health",
+            # Use a minimal context for health checks
+            ctx = default_context()
+            # Create a separate client with no retry for health checks
+            health_http = ServiceHttpClient(
+                base_url=self._http.base_url,
                 timeout=5.0,
+                retry_policy=HEALTH_CHECK_POLICY,
             )
-            response.raise_for_status()
-            return ServiceStatus(name="rag", healthy=True, message="OK")
+            try:
+                response = await health_http.get("/health", ctx)
+                response.raise_for_status()
+                return ServiceStatus(name="rag", healthy=True, message="OK")
+            finally:
+                await health_http.close()
         except Exception as e:
             return ServiceStatus(name="rag", healthy=False, message=str(e))
 
 
-class AsyncRegulationRetriever:
-    """
-    Async client for retrieving HIPAA regulations from the RAG service.
-    """
-    
-    def __init__(self, rag_client: Optional[AsyncRAGClient] = None):
-        self._client = rag_client or AsyncRAGClient()
+class RegulationRetriever:
+    """Client for retrieving HIPAA regulations from the RAG service."""
+
+    def __init__(self, rag_client: RAGClient | None = None):
+        """Initialize the regulation retriever.
+
+        Args:
+            rag_client: Optional RAGClient to use. Creates one if not provided.
+        """
+        self._client = rag_client or RAGClient()
         self._owns_client = rag_client is None
-    
+
     async def close(self) -> None:
         """Close the underlying client if we own it."""
         if self._owns_client:
             await self._client.close()
-    
-    async def __aenter__(self) -> "AsyncRegulationRetriever":
+
+    async def __aenter__(self) -> "RegulationRetriever":
+        """Enter async context manager."""
         return self
-    
-    async def __aexit__(self, *args) -> None:
+
+    async def __aexit__(self, *args: Any) -> None:
+        """Exit async context manager."""
         await self.close()
-    
+
     async def search_regulations(
         self,
         query: str,
         k: int = 5,
         project_id: str = "hipaa_regulations",
+        context: RunContext | None = None,
     ) -> list[dict[str, Any]]:
-        """
-        Search for relevant HIPAA regulations asynchronously.
+        """Search for relevant HIPAA regulations.
+
+        Args:
+            query: Search query.
+            k: Number of results.
+            project_id: Project containing regulations.
+            context: Optional RunContext for correlation.
+
+        Returns:
+            List of matching regulation documents.
         """
         result = await self._client.search(
             query=query,
             project_id=project_id,
             k=k,
+            context=context,
         )
         return result.get("results", [])
-    
+
     async def get_regulation_context(
         self,
         query: str,
         k: int = 3,
         project_id: str = "hipaa_regulations",
+        context: RunContext | None = None,
     ) -> str:
+        """Get formatted regulation context for RAG.
+
+        Args:
+            query: Search query.
+            k: Number of regulations to retrieve.
+            project_id: Project containing regulations.
+            context: Optional RunContext for correlation.
+
+        Returns:
+            Formatted string with numbered regulation excerpts.
         """
-        Get formatted regulation context for RAG asynchronously.
-        """
-        results = await self.search_regulations(query, k, project_id)
-        
+        results = await self.search_regulations(query, k, project_id, context)
+
         if not results:
             return "No relevant HIPAA regulations found."
-        
+
         sections = []
         for i, result in enumerate(results, 1):
             content = result.get("content", "")
             filename = result.get("filename", "Unknown")
             sections.append(f"[{i}] {filename}:\n{content}")
-        
+
         return "\n\n---\n\n".join(sections)
+
+
+# Legacy aliases for backward compatibility
+AsyncRAGClient = RAGClient
+AsyncRegulationRetriever = RegulationRetriever

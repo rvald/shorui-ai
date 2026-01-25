@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     # Ingestion retention
     RAW_UPLOAD_TTL_DAYS: int = 30
 
+    # Service Runtime
+    DEFAULT_TIMEOUT: float = 30.0
+    DEFAULT_MAX_RETRIES: int = 3
+    HTTP_POOL_MAX_CONNECTIONS: int = 100
+    HTTP_POOL_MAX_KEEPALIVE: int = 20
+
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",
