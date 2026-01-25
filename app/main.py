@@ -17,10 +17,14 @@ from app.agent.routes import router as agent_router
 from app.compliance.routes import router as compliance_router
 from shorui_core.auth.middleware import AuthMiddleware
 from shorui_core.config import settings
+from shorui_core.infrastructure.telemetry import TelemetryService, setup_telemetry
 from shorui_core.logging import setup_logging
 
 # Initialize logging
 setup_logging()
+
+# Initialize Telemetry (Tracing/Metrics)
+setup_telemetry()
 
 # Create the unified FastAPI app
 app = FastAPI(
@@ -28,6 +32,9 @@ app = FastAPI(
     description="Unified API for document ingestion and RAG (Retrieval-Augmented Generation)",
     version="1.0.0",
 )
+
+# Instrument FastAPI app
+TelemetryService().instrument_app(app)
 
 # CORS configuration for frontend development
 app.add_middleware(

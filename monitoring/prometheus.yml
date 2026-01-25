@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'shorui-ai-api'
+    metrics_path: '/metrics'
+    static_configs:
+      # 'app' is the service name in docker-compose, port 8082
+      - targets: ['app:8082']

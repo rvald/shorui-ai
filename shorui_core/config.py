@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     HTTP_POOL_MAX_CONNECTIONS: int = 100
     HTTP_POOL_MAX_KEEPALIVE: int = 20
 
+    # Telemetry
+    ENABLE_TELEMETRY: bool = False
+    OTEL_SERVICE_NAME: str | None = None
+    OTEL_EXPORTER_OTLP_ENDPOINT: str | None = None
+
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

@@ -8,6 +8,14 @@ import os
 
 from celery import Celery
 from loguru import logger
+from shorui_core.infrastructure.telemetry import setup_telemetry
+from shorui_core.logging import setup_logging
+
+# Initialize logging for worker
+setup_logging()
+
+# Initialize Telemetry for worker
+setup_telemetry()
 
 # Get broker/backend URLs from environment
 CELERY_BROKER_URL = os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/0")
