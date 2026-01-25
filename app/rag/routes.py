@@ -2,7 +2,7 @@
 RAG API routes for the unified application.
 
 This module provides endpoints for RAG (Retrieval-Augmented Generation):
-- POST /rag/query - Full RAG: retrieve + generate
+- POST /rag/query - Full RAG: retrieve + generate (grounded, citation-enforced)
 - GET /rag/search - Search-only: retrieve without LLM
 """
 
@@ -11,7 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from app.rag.factory import get_generator, get_retriever
+from app.rag.domain.grounding import (
+    RetrievalResult,
+    REFUSAL_COLLECTION_NOT_FOUND,
+    REFUSAL_NO_RELEVANT_CONTENT,
+)
+from app.rag.factory import collection_exists, get_grounded_generator, get_retriever
 from shorui_core.auth.dependencies import require_rag_read
 from shorui_core.domain.auth import AuthContext
 
@@ -28,11 +33,13 @@ class QueryRequest(BaseModel):
     project_id: str = Field(..., description="Project identifier")
     k: int = Field(default=5, ge=1, le=20, description="Number of documents to retrieve")
     backend: str = Field(default="openai", description="LLM backend: 'openai' or 'runpod'")
+    min_sources: int = Field(default=1, ge=0, le=10, description="Minimum sources required")
 
 
 class SourceDocument(BaseModel):
     """A source document used for the answer."""
 
+    source_id: str | None = None
     filename: str | None = None
     page_num: int | None = None
     score: float
@@ -44,6 +51,8 @@ class QueryResponse(BaseModel):
 
     answer: str
     sources: list[SourceDocument] = []
+    citations: list[str] = Field(default_factory=list, description="source_ids cited")
+    refusal_reason: str | None = Field(default=None, description="Reason for refusal")
     query: str
 
 
@@ -81,71 +90,98 @@ async def rag_query(
     auth: AuthContext = Depends(require_rag_read),
 ):
     """
-    Full RAG query: retrieve context and generate answer.
+    Full RAG query: retrieve context and generate grounded answer.
 
     This endpoint:
-    1. Searches for relevant documents in Qdrant
-    2. Uses the documents as context for the LLM
-    3. Returns a generated answer with sources
+    1. Checks if the collection exists (fast, no LLM cost)
+    2. Runs a probe search to check for relevant content (1 embedding, no LLM)
+    3. If relevant content exists, runs full pipeline with query expansion
+    4. Generates a citation-enforced answer
+    5. Returns answer with citations and sources
     """
     logger.info(f"RAG query: '{request.query}' for project '{request.project_id}'")
 
     try:
-        # Retrieve context using factory
-        retriever = get_retriever()
-        
-        # Note: We use the full retrieve pipeline here which returns a dict
-        # matching what the route expects (documents list inside a dict)
-        retrieval_result = await retriever.retrieve(
-            query=request.query, project_id=request.project_id, k=request.k
-        )
-        search_results = retrieval_result["documents"]
-
-        if not search_results:
+        # 1. Early check: Does the collection exist? (no LLM cost)
+        if not collection_exists(request.project_id):
+            logger.info(f"Collection not found for project '{request.project_id}' - early refusal")
             return QueryResponse(
-                answer="I couldn't find any relevant documents for your question. Please try rephrasing or ensure documents have been indexed.",
+                answer="I don't have enough information from the indexed documents to answer this question.",
                 sources=[],
+                citations=[],
+                refusal_reason=REFUSAL_COLLECTION_NOT_FOUND,
                 query=request.query,
             )
 
-        # Build context string from search results
-        context_parts = []
-        for i, result in enumerate(search_results, 1):
-            if result.get("is_graph"):
-                 context_parts.append(result.get("content", ""))
-            else:
-                source = result.get("filename", "unknown")
-                page = result.get("page_num", "?")
-                content = result.get("content", "")
-                context_parts.append(f"[Source {i}: {source}, page {page}]\n{content}")
-
-        context_text = "\n\n".join(context_parts)
-
-        # Generate answer using specified backend via factory
-        generator = get_generator(backend=request.backend)
-        generation_result = await generator.generate(
-            query=request.query, context=context_text
+        # 2. Probe search: Quick check for relevant content (1 embedding, no query expansion)
+        retriever = get_retriever()
+        probe_results = await retriever.search(
+            query=request.query,
+            project_id=request.project_id,
+            k=1,
         )
-
-        # Build sources list
-        sources = []
-        for r in search_results[:5]:  # Top 5 sources
-            if r.get("is_graph"):
-                continue
-                
-            sources.append(
-                SourceDocument(
-                    filename=r.get("filename"),
-                    page_num=r.get("page_num"),
-                    score=r.get("score", 0),
-                    content_preview=r.get("content", "")[:200] + "..."
-                    if len(r.get("content", "")) > 200
-                    else r.get("content", ""),
-                )
+        
+        # Check if probe found anything relevant (score threshold)
+        PROBE_SCORE_THRESHOLD = 0.3
+        if not probe_results or probe_results[0].get("score", 0) < PROBE_SCORE_THRESHOLD:
+            logger.info(
+                f"Probe search returned no relevant content (score < {PROBE_SCORE_THRESHOLD}) - early refusal"
+            )
+            return QueryResponse(
+                answer="I don't have enough information from the indexed documents to answer this question.",
+                sources=[],
+                citations=[],
+                refusal_reason=REFUSAL_NO_RELEVANT_CONTENT,
+                query=request.query,
             )
 
+        # 3. Full retrieval pipeline (now we know there's relevant content)
+        logger.info("Probe successful - running full retrieval pipeline")
+        raw_result = await retriever.retrieve(
+            query=request.query, project_id=request.project_id, k=request.k
+        )
+        
+        # 4. Convert to structured RetrievalResult
+        retrieval_result = RetrievalResult.from_documents(
+            documents=raw_result["documents"],
+            query_analysis={
+                "keywords": raw_result.get("keywords", []),
+                "intent": raw_result.get("intent"),
+                "is_gap_query": raw_result.get("is_gap_query", False),
+            },
+            min_sources=request.min_sources,
+        )
+
+        # 5. Generate grounded answer
+        grounded_gen = get_grounded_generator(
+            backend=request.backend,
+            min_sources=request.min_sources,
+        )
+        answer_result = await grounded_gen.generate_grounded(
+            query=request.query,
+            retrieval_result=retrieval_result,
+        )
+
+        # 6. Build sources list from retrieval
+        sources = [
+            SourceDocument(
+                source_id=src.source_id,
+                filename=src.metadata.get("filename"),
+                page_num=src.metadata.get("page_num"),
+                score=src.score,
+                content_preview=src.content_snippet[:200] + "..."
+                if len(src.content_snippet) > 200
+                else src.content_snippet,
+            )
+            for src in retrieval_result.sources[:5]
+        ]
+
         return QueryResponse(
-            answer=generation_result["answer"], sources=sources, query=request.query
+            answer=answer_result.answer_text,
+            sources=sources,
+            citations=answer_result.citations,
+            refusal_reason=answer_result.refusal_reason,
+            query=request.query,
         )
 
     except Exception as e:
