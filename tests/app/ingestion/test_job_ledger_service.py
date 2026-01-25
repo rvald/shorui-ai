@@ -205,8 +205,38 @@ class TestJobLedgerFailure:
         assert "dead_letter" in call_args.lower()
 
 
+
+class TestJobLedgerArtifacts:
+    """Tests for artifact registration delegation."""
+
+    def test_register_artifact_delegates_to_service(self, mock_postgres, mock_artifact_service):
+        """register_artifact should delegate to ArtifactService.register."""
+        from app.ingestion.services.job_ledger import JobLedgerService
+
+        service = JobLedgerService()
+        result = service.register_artifact(
+            tenant_id="tenant-1",
+            project_id="project-1",
+            artifact_type="raw_upload",
+            storage_pointer="raw/path/file.pdf",
+            created_by_job_id="job-123"
+        )
+
+        mock_artifact_service.register.assert_called_once()
+        assert result == mock_artifact_service.register.return_value
+
+
 # --- Fixtures ---
 
+
+@pytest.fixture
+def mock_artifact_service():
+    """Provides mock ArtifactService."""
+    with patch("app.ingestion.services.job_ledger.get_artifact_service") as factory_mock:
+        service_mock = MagicMock()
+        service_mock.register.return_value = "new-artifact-id"
+        factory_mock.return_value = service_mock
+        yield service_mock
 
 @pytest.fixture
 def mock_postgres():

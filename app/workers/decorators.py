@@ -1,8 +1,12 @@
 import functools
+import inspect
 from loguru import logger
-from app.ingestion.services.job_ledger import JobLedgerService
 
-def track_job_ledger(content_arg: str):
+from app.ingestion.services.job_ledger import JobLedgerService
+from shorui_core.artifacts import JobType
+
+
+def track_job_ledger(content_arg: str, job_type: JobType = JobType.COMPLIANCE_TRANSCRIPT):
     """
     Decorator to handle JobLedger lifecycle for Celery tasks.
 
@@ -16,35 +20,29 @@ def track_job_ledger(content_arg: str):
 
     Args:
         content_arg: Name of the argument containing the file content/text for hashing.
+        job_type: JobType enum for this task (default: COMPLIANCE_TRANSCRIPT).
     """
     def decorator(func):
         @functools.wraps(func)
         def wrapper(self, *args, **kwargs):
-            # Resolve arguments to find job_id, project_id, filename, and content
-            # Inspect signature to map args to names if needed, but Celery usually passes kwargs
-            # or positional args. We'll assume job_id is explicit or in kwargs.
-            
-            # For robustness, we assume the signature is (self, job_id, ...) like our tasks
-            # If strictly kwargs, we get them from kwargs.
-            
-            # Helper to get arg value
-            import inspect
+            # Resolve arguments to find job_id, project_id, tenant_id, filename, and content
             sig = inspect.signature(func)
             bound_args = sig.bind(self, *args, **kwargs)
             bound_args.apply_defaults()
             
             job_id = bound_args.arguments.get("job_id")
             project_id = bound_args.arguments.get("project_id")
+            tenant_id = bound_args.arguments.get("tenant_id", "default")
             filename = bound_args.arguments.get("filename")
             content = bound_args.arguments.get(content_arg)
 
             if not all([job_id, project_id, filename]):
-                 # If we can't find core tracking info, warn and run untracked (?) 
-                 # or fail hard. Fail hard is safer for a tracked system.
-                 logger.error(f"Missing required args for ledger tracking: job_id={job_id}, project_id={project_id}")
-                 # We still run the function, assuming it might handle itself or fail.
-                 # But we can't track it.
-                 return func(self, *args, **kwargs)
+                logger.error(
+                    f"Missing required args for ledger tracking: "
+                    f"job_id={job_id}, project_id={project_id}"
+                )
+                # Still run the function, but can't track it
+                return func(self, *args, **kwargs)
 
             ledger_service = JobLedgerService()
 
@@ -55,19 +53,21 @@ def track_job_ledger(content_arg: str):
                 elif isinstance(content, bytes):
                     content_bytes = content
                 else:
-                    content_bytes = b"" # Should probably not happen
+                    content_bytes = b""
                 
                 content_hash = ledger_service.compute_content_hash(content_bytes)
 
                 # 2. Idempotency Check
                 existing = ledger_service.check_idempotency(
                     idempotency_key=content_hash,
-                    job_type="compliance_analysis",
-                    tenant_id="default",  # TODO: Pass tenant_id through task args
+                    job_type=job_type.value,
+                    tenant_id=tenant_id,
                     project_id=project_id,
                 )
                 if existing and existing.get("status") == "completed":
-                    logger.info(f"[{job_id}] Document already processed (job: {existing['job_id']})")
+                    logger.info(
+                        f"[{job_id}] Document already processed (job: {existing['job_id']})"
+                    )
                     return {
                         "status": "skipped",
                         "existing_job_id": existing["job_id"],
@@ -75,15 +75,11 @@ def track_job_ledger(content_arg: str):
                     }
 
                 # 3. Create Job
-                # Note: Storage path is unknown here until Orchestrator runs. 
-                # We put a placeholder or let Orchestrator update it?
-                # The original code created the job here.
-                # We will set a temporary storage path.
                 try:
                     ledger_service.create_job(
-                        tenant_id="default",  # TODO: Pass tenant_id through task args
+                        tenant_id=tenant_id,
                         project_id=project_id,
-                        job_type="compliance_analysis",
+                        job_type=job_type,
                         job_id=job_id,
                         idempotency_key=content_hash,
                         document_type=filename,
@@ -97,8 +93,9 @@ def track_job_ledger(content_arg: str):
                 result = func(self, *args, **kwargs)
 
                 # 5. Complete Job
-                # Orchestrator might return stats like 'items_indexed' or 'phi_detected'
-                items_indexed = result.get("chunks_created") or result.get("phi_detected") or 0
+                items_indexed = (
+                    result.get("chunks_created") or result.get("phi_detected") or 0
+                )
                 
                 # Store transcript_id and report_id in result_artifacts for retrieval
                 result_artifacts = {
@@ -132,3 +129,4 @@ def track_job_ledger(content_arg: str):
 
         return wrapper
     return decorator
+

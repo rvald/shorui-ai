@@ -11,10 +11,11 @@ import hashlib
 import json
 import uuid
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from loguru import logger
 
+from shorui_core.artifacts import ArtifactService, ArtifactType, JobType, get_artifact_service
 from shorui_core.config import settings
 from shorui_core.infrastructure.postgres import get_db_connection
 
@@ -39,7 +40,7 @@ class JobLedgerService:
         *,
         tenant_id: str,
         project_id: str,
-        job_type: str,
+        job_type: Union[JobType, str],
         job_id: Optional[str] = None,
         status: str = "pending",
         progress: int = 0,
@@ -51,6 +52,8 @@ class JobLedgerService:
         byte_size: Optional[int] = None,
         input_artifacts: Optional[list[dict[str, Any]]] = None,
     ) -> str:
+        # Normalize job_type to string
+        jtype = job_type.value if isinstance(job_type, JobType) else job_type
         job_uuid = job_id or str(uuid.uuid4())
 
         with get_db_connection() as conn:
@@ -72,7 +75,7 @@ class JobLedgerService:
                     job_uuid,
                     tenant_id,
                     project_id,
-                    job_type,
+                    jtype,
                     status,
                     progress,
                     idempotency_key,
@@ -87,7 +90,7 @@ class JobLedgerService:
             )
             conn.commit()
 
-        logger.info(f"Created job {job_uuid} (type={job_type}) for project={project_id}")
+        logger.info(f"Created job {job_uuid} (type={jtype}) for project={project_id}")
         return job_uuid
 
     def update_status(
@@ -247,7 +250,7 @@ class JobLedgerService:
         *,
         tenant_id: str,
         project_id: str,
-        artifact_type: str,
+        artifact_type: Union[ArtifactType, str],
         storage_pointer: str,
         content_type: Optional[str] = None,
         byte_size: Optional[int] = None,
@@ -256,41 +259,25 @@ class JobLedgerService:
         created_by_job_id: Optional[str] = None,
         storage_backend: Optional[str] = None,
     ) -> str:
-        artifact_id = str(uuid.uuid4())
-
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO artifacts (
-                    artifact_id, tenant_id, project_id, artifact_type,
-                    storage_backend, storage_pointer, content_type,
-                    byte_size, sha256, schema_version, created_at, created_by_job_id
-                )
-                VALUES (
-                    %s, %s, %s, %s,
-                    %s, %s, %s,
-                    %s, %s, %s, %s, %s
-                )
-                """,
-                (
-                    artifact_id,
-                    tenant_id,
-                    project_id,
-                    artifact_type,
-                    storage_backend or STORAGE_BACKEND,
-                    storage_pointer,
-                    content_type,
-                    byte_size,
-                    sha256,
-                    schema_version,
-                    datetime.utcnow(),
-                    created_by_job_id,
-                ),
-            )
-            conn.commit()
-
-        return artifact_id
+        """
+        Register an artifact in the canonical registry.
+        
+        Delegates to ArtifactService for consistent artifact tracking
+        across all modules.
+        """
+        artifact_service = get_artifact_service()
+        return artifact_service.register(
+            tenant_id=tenant_id,
+            project_id=project_id,
+            artifact_type=artifact_type,
+            storage_pointer=storage_pointer,
+            content_type=content_type,
+            byte_size=byte_size,
+            sha256=sha256,
+            schema_version=schema_version,
+            created_by_job_id=created_by_job_id,
+            storage_backend=storage_backend or STORAGE_BACKEND,
+        )
 
     # ---------------------------------------------------------------------
     # Idempotency helpers

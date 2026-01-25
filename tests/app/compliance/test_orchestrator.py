@@ -56,6 +56,13 @@ def mock_pipeline():
         factory_mock.return_value = pipeline_mock
         yield pipeline_mock
 
+@pytest.fixture
+def mock_artifact_service():
+    with patch("app.compliance.services.orchestrator.get_artifact_service") as factory_mock:
+        service_mock = MagicMock()
+        factory_mock.return_value = service_mock
+        yield service_mock
+
 @pytest.mark.asyncio
 async def test_analyze_transcript_flow(
     mock_privacy_service, 
@@ -65,6 +72,7 @@ async def test_analyze_transcript_flow(
     mock_report_repo,
     mock_storage,
     mock_pipeline,
+    mock_artifact_service,
 ):
     # Setup Mocks
     mock_privacy_result = MagicMock()
@@ -99,6 +107,7 @@ async def test_analyze_transcript_flow(
         "Clinical text", 
         transcript_id=ANY, 
         filename="notes.txt",
+        tenant_id="default",
         project_id="proj-1",
         skip_llm=False
     )
@@ -113,6 +122,9 @@ async def test_analyze_transcript_flow(
     
     # Verify Report was persisted  
     mock_report_repo.create.assert_called_once()
+    
+    # Verify Canonical Artifacts were registered
+    assert mock_artifact_service.register.call_count == 2
     
     # Verify Result
     assert result["status"] == "completed"

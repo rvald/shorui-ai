@@ -13,6 +13,7 @@ from app.compliance.services.transcript_repository import get_transcript_reposit
 from app.compliance.services.report_repository import get_report_repository
 from app.ingestion.services.pipeline import create_document_pipeline, PipelineContext
 from app.ingestion.services.storage import get_storage_backend
+from shorui_core.artifacts import ArtifactService, ArtifactType, get_artifact_service
 
 
 class ComplianceOrchestrator:
@@ -28,6 +29,7 @@ class ComplianceOrchestrator:
         self.transcript_repo = get_transcript_repository()
         self.report_repo = get_report_repository()
         self.storage = get_storage_backend()
+        self.artifact_service = get_artifact_service()
 
     async def analyze_transcript(
         self,
@@ -74,6 +76,20 @@ class ComplianceOrchestrator:
                 job_id=job_id,
                 transcript_id=transcript_id,
             )
+            
+            # Register transcript as canonical artifact for cross-module queryability
+            self.artifact_service.register(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                artifact_type=ArtifactType.TRANSCRIPT,
+                storage_pointer=storage_pointer,
+                content_type="text/plain",
+                byte_size=len(content_bytes),
+                sha256=file_hash,
+                created_by_job_id=job_id,
+                artifact_id=transcript_id,
+            )
+            
             logger.info(f"[{job_id}] Persisted transcript {transcript_id}")
         except Exception as e:
             logger.error(f"[{job_id}] Failed to persist transcript: {e}")
@@ -86,6 +102,7 @@ class ComplianceOrchestrator:
             text,
             transcript_id=transcript_id,
             filename=filename,
+            tenant_id=tenant_id,
             project_id=project_id,
             skip_llm=False,
         )
@@ -110,6 +127,20 @@ class ComplianceOrchestrator:
                 report=report,
                 job_id=job_id,
             )
+            
+            # Register report as canonical artifact for cross-module queryability
+            self.artifact_service.register(
+                tenant_id=tenant_id,
+                project_id=project_id,
+                artifact_type=ArtifactType.COMPLIANCE_REPORT,
+                storage_pointer=f"postgres:compliance_reports:{report_id}",
+                content_type="application/json",
+                schema_version="1.0",
+                created_by_job_id=job_id,
+                artifact_id=report_id,
+                storage_backend="postgres",
+            )
+            
             logger.info(f"[{job_id}] Persisted compliance report {report_id}")
 
             report_data = {

@@ -8,6 +8,7 @@ Tasks delegate to specialized orchestrators for the actual processing logic.
 from app.workers.celery_app import celery_app
 from app.ingestion.services.orchestrator import get_ingestion_orchestrator
 from app.ingestion.services.job_ledger import JobLedgerService
+from shorui_core.artifacts import JobType, ArtifactType
 
 @celery_app.task(
     bind=True,
@@ -44,7 +45,7 @@ def process_document(
     if idempotency_key:
         existing = ledger_service.check_idempotency(
             idempotency_key=idempotency_key,
-            job_type="ingestion_document",
+            job_type=JobType.INGESTION_DOCUMENT,
             tenant_id=tenant_id,
             project_id=project_id,
         )
@@ -81,7 +82,7 @@ def process_document(
             processed_pointer=result.get("processed_pointer"),
             result_artifacts=[
                 {
-                    "type": "ingestion_result",
+                    "type": ArtifactType.INGESTION_RESULT,
                     "pointer": result.get("result_pointer"),
                     "collection_name": result.get("collection_name"),
                 }

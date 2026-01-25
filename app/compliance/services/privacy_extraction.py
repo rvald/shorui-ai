@@ -138,6 +138,7 @@ class PrivacyAwareExtractionService:
         text: str,
         transcript_id: str | None = None,
         filename: str = "transcript.txt",
+        tenant_id: str = "default",
         project_id: str = "default",
         skip_llm: bool = False,
     ) -> PHIExtractionResult:
@@ -162,6 +163,8 @@ class PrivacyAwareExtractionService:
         await self._log_audit_event(
             event_type=AuditEventType.PHI_DETECTED,
             description=f"Detected {len(phi_spans)} PHI spans in transcript",
+            tenant_id=tenant_id,
+            project_id=project_id,
             resource_type="Transcript",
             resource_id=transcript_id,
             metadata={"phi_count": len(phi_spans), "text_length": len(text)},
@@ -443,6 +446,8 @@ class PrivacyAwareExtractionService:
         self,
         event_type: AuditEventType,
         description: str,
+        tenant_id: str,
+        project_id: str,
         resource_type: str | None = None,
         resource_id: str | None = None,
         metadata: dict[str, Any] | None = None,
@@ -456,6 +461,8 @@ class PrivacyAwareExtractionService:
             await self._audit_logger.log(
                 event_type=event_type,
                 description=description,
+                tenant_id=tenant_id,
+                project_id=project_id,
                 resource_type=resource_type,
                 resource_id=resource_id,
                 metadata=metadata or {},

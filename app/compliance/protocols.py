@@ -46,6 +46,8 @@ class AuditLogger(Protocol):
         self,
         event_type: AuditEventType,
         description: str,
+        tenant_id: str,
+        project_id: str,
         resource_type: str | None = None,
         resource_id: str | None = None,
         user_id: str | None = None,
