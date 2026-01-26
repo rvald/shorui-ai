@@ -57,6 +57,7 @@ dependencies = [
     "opentelemetry-instrumentation-celery>=0.60b1",
     "opentelemetry-exporter-prometheus>=0.60b1",
     "prometheus-fastapi-instrumentator>=7.1.0",
+    "slowapi>=0.1.9",
 ]
 
 

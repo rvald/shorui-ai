@@ -82,6 +82,9 @@ class Settings(BaseSettings):
 
     # Auth settings
     REQUIRE_AUTH: bool = False  # Set True in production
+    JWT_SECRET: str = ""  # Required when REQUIRE_AUTH=True
+    JWT_ACCESS_TTL: int = 900  # 15 minutes
+    JWT_REFRESH_TTL: int = 86400  # 1 day
 
     # Ingestion retention
     RAW_UPLOAD_TTL_DAYS: int = 30

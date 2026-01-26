@@ -1,12 +1,21 @@
 import type { Message } from "@langchain/langgraph-sdk";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Routes, Route } from "react-router-dom";
 import { WelcomeScreen } from "@/components/WelcomeScreen";
 import { AgentChatView } from "@/components/AgentChatView";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { Button } from "@/components/ui/button";
 import { agentApi } from "@/api/agentApi";
+import { AuthProvider, useAuth } from "@/context/AuthContext";
+import LoginPage from "@/pages/Login";
+import RegisterPage from "@/pages/Register";
 
-export default function App() {
+/**
+ * Main chat view component (authenticated).
+ */
+function ChatView() {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const { user, accessToken, logout } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -14,9 +23,9 @@ export default function App() {
 
   // Create agent session on mount
   useEffect(() => {
-    if (!sessionId) {
+    if (!sessionId && accessToken) {
       agentApi
-        .createSession()
+        .createSession(accessToken)
         .then((session) => {
           setSessionId(session.session_id);
         })
@@ -25,7 +34,7 @@ export default function App() {
           setError("Failed to create agent session");
         });
     }
-  }, [sessionId]);
+  }, [sessionId, accessToken]);
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -45,6 +54,10 @@ export default function App() {
       if (!submittedInputValue.trim() && files.length === 0) return;
       if (!sessionId) {
         setError("No agent session. Please refresh.");
+        return;
+      }
+      if (!accessToken) {
+        setError("Authentication token missing. Please login again.");
         return;
       }
 
@@ -74,7 +87,8 @@ export default function App() {
           submittedInputValue ||
           "Please analyze the uploaded file(s) for HIPAA compliance.",
           "default",
-          files.length > 0 ? files : undefined
+          files.length > 0 ? files : undefined,
+          accessToken
         );
 
         const aiMsgId = (Date.now() + 1).toString();
@@ -92,7 +106,7 @@ export default function App() {
         if (err.message.includes("expired")) {
           // Session expired, create new one
           try {
-            const newSession = await agentApi.createSession();
+            const newSession = await agentApi.createSession(accessToken);
             setSessionId(newSession.session_id);
             setMessages([]);
             setError("Session expired. Started new session. Please try again.");
@@ -106,7 +120,7 @@ export default function App() {
         setIsLoading(false);
       }
     },
-    [sessionId]
+    [sessionId, accessToken]
   );
 
   const handleCancel = useCallback(() => {
@@ -119,6 +133,10 @@ export default function App() {
     setSessionId(null);
   }, []);
 
+  const handleLogout = useCallback(async () => {
+    await logout();
+  }, [logout]);
+
   return (
     <div className="flex h-screen bg-neutral-800 text-neutral-100 font-sans antialiased">
       <main className="h-full w-full max-w-4xl mx-auto flex flex-col">
@@ -127,16 +145,31 @@ export default function App() {
           <h1 className="text-lg font-semibold text-neutral-100">
             🩺 HIPAA Compliance Assistant
           </h1>
-          {messages.length > 0 && (
+          <div className="flex items-center gap-3">
+            {user && (
+              <span className="text-sm text-neutral-400 hidden sm:inline">
+                {user.email}
+              </span>
+            )}
+            {messages.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleNewSession}
+                className="text-neutral-400 hover:text-neutral-100"
+              >
+                New Session
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
-              onClick={handleNewSession}
+              onClick={handleLogout}
               className="text-neutral-400 hover:text-neutral-100"
             >
-              New Session
+              Logout
             </Button>
-          )}
+          </div>
         </div>
 
         {/* Content */}
@@ -169,5 +202,27 @@ export default function App() {
         </div>
       </main>
     </div>
+  );
+}
+
+/**
+ * App root with routing.
+ */
+export default function App() {
+  return (
+    <AuthProvider>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute>
+              <ChatView />
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </AuthProvider>
   );
 }

@@ -26,9 +26,16 @@ export const agentApi = {
     /**
      * Create a new agent session.
      */
-    async createSession(): Promise<AgentSession> {
+    async createSession(accessToken?: string): Promise<AgentSession> {
+        const headers: HeadersInit = {};
+        if (accessToken) {
+            headers["Authorization"] = `Bearer ${accessToken}`;
+        }
+
         const response = await fetch(`${AGENT_API_URL}/agent/sessions`, {
             method: "POST",
+            headers,
+            credentials: "include",
         });
         if (!response.ok) {
             throw new Error("Failed to create session");
@@ -44,7 +51,8 @@ export const agentApi = {
         sessionId: string,
         message: string,
         projectId: string = "default",
-        files?: File[]
+        files?: File[],
+        accessToken?: string
     ): Promise<AgentResponse> {
         const formData = new FormData();
         formData.append("message", message);
@@ -56,11 +64,18 @@ export const agentApi = {
             });
         }
 
+        const headers: HeadersInit = {};
+        if (accessToken) {
+            headers["Authorization"] = `Bearer ${accessToken}`;
+        }
+
         const response = await fetch(
             `${AGENT_API_URL}/agent/sessions/${sessionId}/messages`,
             {
                 method: "POST",
+                headers,
                 body: formData,
+                credentials: "include",
             }
         );
         if (!response.ok) {

@@ -43,8 +43,17 @@ async def create_session(
 ):
     """Create a new ephemeral agent session."""
     service = get_service()
-    # Pass tenant_id to bind session to tenant
-    session_id = await service.create_session(tenant_id=auth.tenant_id)
+    
+    # Extract user_id if authenticated via JWT (user:uuid)
+    user_id = None
+    if auth.principal.key_id.startswith("user:"):
+        user_id = auth.principal.key_id[5:]
+        
+    # Pass tenant_id to bind session to tenant, and user_id for invalidation
+    session_id = await service.create_session(
+        tenant_id=auth.tenant_id,
+        user_id=user_id
+    )
     
     return CreateSessionResponse(
         session_id=session_id,

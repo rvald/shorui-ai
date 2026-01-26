@@ -15,10 +15,14 @@ from app.ingestion.routes import router as ingestion_router
 from app.rag.routes import router as rag_router
 from app.agent.routes import router as agent_router
 from app.compliance.routes import router as compliance_router
+from app.auth.routes import router as auth_router
 from shorui_core.auth.middleware import AuthMiddleware
 from shorui_core.config import settings
 from shorui_core.infrastructure.telemetry import TelemetryService, setup_telemetry
+from shorui_core.infrastructure.rate_limiter import limiter, _rate_limit_exceeded_handler
 from shorui_core.logging import setup_logging
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 # Initialize logging
 setup_logging()
@@ -36,7 +40,25 @@ app = FastAPI(
 # Instrument FastAPI app
 TelemetryService().instrument_app(app)
 
+# Rate limiter setup
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+# Auth middleware (set REQUIRE_AUTH=true in production)
+app.add_middleware(AuthMiddleware, require_auth=settings.REQUIRE_AUTH)
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@app.get("/test-limit")
+@limiter.limit("1/minute")
+async def test_limit(request: Request):
+    return JSONResponse({"message": "ok"})
+
+
 # CORS configuration for frontend development
+# NOTE: CORS must be the last middleware added so it runs FIRST
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -50,9 +72,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Auth middleware (set REQUIRE_AUTH=true in production)
-app.add_middleware(AuthMiddleware, require_auth=settings.REQUIRE_AUTH)
-
 
 # Mount the ingestion router under /ingest prefix
 app.include_router(ingestion_router, prefix="/ingest", tags=["Ingestion"])
@@ -65,6 +84,9 @@ app.include_router(agent_router, tags=["Agent"])
 
 # Mount the compliance router under /compliance prefix
 app.include_router(compliance_router, prefix="/compliance", tags=["Compliance"])
+
+# Mount the auth router (no prefix, routes already have /auth)
+app.include_router(auth_router, tags=["Auth"])
 
 
 @app.get("/health")
